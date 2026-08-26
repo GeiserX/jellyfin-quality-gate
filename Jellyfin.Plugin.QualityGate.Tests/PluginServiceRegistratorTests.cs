@@ -13,20 +13,6 @@ namespace Jellyfin.Plugin.QualityGate.Tests;
 public class PluginServiceRegistratorTests
 {
     [Fact]
-    public void RegisterServices_AddsMediaSourceResultFilter()
-    {
-        var registrator = new PluginServiceRegistrator();
-        var services = new ServiceCollection();
-        var appHost = new Mock<IServerApplicationHost>();
-
-        registrator.RegisterServices(services, appHost.Object);
-
-        // Verify MediaSourceResultFilter is registered as scoped
-        var filterDescriptor = Assert.Single(services, s => s.ServiceType == typeof(MediaSourceResultFilter));
-        Assert.Equal(ServiceLifetime.Scoped, filterDescriptor.Lifetime);
-    }
-
-    [Fact]
     public void RegisterServices_AddsIntroProvider()
     {
         var registrator = new PluginServiceRegistrator();
@@ -37,10 +23,26 @@ public class PluginServiceRegistratorTests
 
         var introDescriptor = Assert.Single(services, s => s.ServiceType == typeof(IIntroProvider));
         Assert.Equal(ServiceLifetime.Singleton, introDescriptor.Lifetime);
+        Assert.Equal(typeof(QualityGateIntroProvider), introDescriptor.ImplementationType);
     }
 
     [Fact]
-    public void RegisterServices_PostConfiguresMvcOptions()
+    public void RegisterServices_DoesNotRegisterMediaSourceResultFilter()
+    {
+        // Intro-only build: the media source filtering path must stay unregistered
+        // until it has been re-validated against the Jellyfin 12 ABI.
+        var registrator = new PluginServiceRegistrator();
+        var services = new ServiceCollection();
+        var appHost = new Mock<IServerApplicationHost>();
+
+        registrator.RegisterServices(services, appHost.Object);
+
+        Assert.DoesNotContain(services, s => s.ServiceType == typeof(MediaSourceResultFilter));
+        Assert.DoesNotContain(services, s => s.ServiceType == typeof(IPostConfigureOptions<MvcOptions>));
+    }
+
+    [Fact]
+    public void RegisterServices_RegistersOnlyTheIntroProvider()
     {
         var registrator = new PluginServiceRegistrator();
         var services = new ServiceCollection();
@@ -48,8 +50,7 @@ public class PluginServiceRegistratorTests
 
         registrator.RegisterServices(services, appHost.Object);
 
-        // PostConfigure registers an IPostConfigureOptions<MvcOptions>
-        Assert.Contains(services, s =>
-            s.ServiceType == typeof(IPostConfigureOptions<MvcOptions>));
+        var descriptor = Assert.Single(services);
+        Assert.Equal(typeof(IIntroProvider), descriptor.ServiceType);
     }
 }

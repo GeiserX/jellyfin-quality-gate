@@ -40,7 +40,7 @@ jobs:
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
         with:
-          dotnet-version: '9.0.x'
+          dotnet-version: '10.0.x'
 
       - name: Restore dependencies
         run: dotnet restore
@@ -60,8 +60,8 @@ jobs:
       - name: Create plugin package
         run: |
           mkdir -p release
-          cp Jellyfin.Plugin.QualityGate/bin/Release/net9.0/Jellyfin.Plugin.QualityGate.dll release/
-          cp Jellyfin.Plugin.QualityGate/bin/Release/net9.0/build.yaml release/ 2>/dev/null || true
+          cp Jellyfin.Plugin.QualityGate/bin/Release/net10.0/Jellyfin.Plugin.QualityGate.dll release/
+          cp Jellyfin.Plugin.QualityGate/bin/Release/net10.0/build.yaml release/ 2>/dev/null || true
           cd release && zip -r ../quality-gate_${{ steps.version.outputs.version }}.zip .
 
       - name: Calculate checksum
@@ -81,7 +81,7 @@ jobs:
           {
             "version": "${VERSION}",
             "changelog": "See https://github.com/GeiserX/quality-gate/releases",
-            "targetAbi": "10.11.0.0",
+            "targetAbi": "12.0.0.0",
             "sourceUrl": "https://github.com/GeiserX/quality-gate/releases/download/v${VERSION}/quality-gate_${VERSION}.zip",
             "checksum": "${CHECKSUM}",
             "timestamp": "${TIMESTAMP}"

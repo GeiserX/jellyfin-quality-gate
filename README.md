@@ -4,8 +4,8 @@
 
 <p align="center">
   <a href="https://github.com/GeiserX/quality-gate/releases"><img src="https://img.shields.io/github/v/release/GeiserX/quality-gate?style=flat-square&logo=github" alt="GitHub Release"></a>
-  <a href="https://jellyfin.org"><img src="https://img.shields.io/badge/Jellyfin-10.11+-00a4dc?style=flat-square&logo=jellyfin" alt="Jellyfin Version"></a>
-  <a href="https://dotnet.microsoft.com"><img src="https://img.shields.io/badge/.NET-9.0-512bd4?style=flat-square&logo=dotnet" alt=".NET"></a>
+  <a href="https://jellyfin.org"><img src="https://img.shields.io/badge/Jellyfin-12.0+-00a4dc?style=flat-square&logo=jellyfin" alt="Jellyfin Version"></a>
+  <a href="https://dotnet.microsoft.com"><img src="https://img.shields.io/badge/.NET-10.0-512bd4?style=flat-square&logo=dotnet" alt=".NET"></a>
   <a href="LICENSE"><img src="https://img.shields.io/github/license/GeiserX/quality-gate?style=flat-square" alt="License"></a>
   <a href="https://github.com/GeiserX/quality-gate/actions"><img src="https://img.shields.io/github/actions/workflow/status/GeiserX/quality-gate/build.yml?style=flat-square&logo=github-actions&logoColor=white&label=CI" alt="CI"></a>
   <a href="https://github.com/GeiserX/quality-gate/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/GeiserX/quality-gate/build.yml?branch=main&style=flat-square&label=tests" alt="Tests"></a>
@@ -14,6 +14,8 @@
 </p>
 
 <p align="center"><strong>Intelligent media access control for Jellyfin</strong></p>
+
+> **v3.4.0.0 is an intro-only build for Jellyfin 12.** Only the per-policy intro provider is registered; media source filtering (and the `/QualityGate` API) is not active until it has been re-validated against the Jellyfin 12 ABI. Policies and user assignments in the admin page keep working and drive intro selection. For version filtering on Jellyfin 12, use separate libraries per quality tier with Jellyfin's built-in Library Access settings.
 
 ---
 
@@ -237,7 +239,7 @@ Jellyfin merges these into a single item with multiple MediaSources. The plugin 
 
 ### Prerequisites
 
-- [.NET 9.0 SDK](https://dotnet.microsoft.com/download/dotnet/9.0)
+- [.NET 10.0 SDK](https://dotnet.microsoft.com/download/dotnet/10.0)
 - Git
 
 ### Build
@@ -248,7 +250,7 @@ cd quality-gate/Jellyfin.Plugin.QualityGate
 dotnet build -c Release
 ```
 
-The compiled plugin will be in `bin/Release/net9.0/`.
+The compiled plugin will be in `bin/Release/net10.0/`.
 
 ## Security
 
