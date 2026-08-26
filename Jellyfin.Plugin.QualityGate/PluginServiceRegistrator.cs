@@ -1,12 +1,8 @@
-using Jellyfin.Plugin.QualityGate.Filters;
 using Jellyfin.Plugin.QualityGate.Providers;
 using MediaBrowser.Controller;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Plugins;
-using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 
 namespace Jellyfin.Plugin.QualityGate;
 
@@ -18,17 +14,10 @@ public class PluginServiceRegistrator : IPluginServiceRegistrator
     /// <inheritdoc />
     public void RegisterServices(IServiceCollection serviceCollection, IServerApplicationHost applicationHost)
     {
-        // Register the filter in DI explicitly
-        serviceCollection.AddScoped<MediaSourceResultFilter>();
-
-        // Use PostConfigure to ensure the filter is added after all other MVC configuration
-        serviceCollection.PostConfigure<MvcOptions>(options =>
-        {
-            options.Filters.AddService<MediaSourceResultFilter>();
-        });
-
-        // Intro provider for policy-based intro selection
+        // Intro-only build: the policy-based intro provider is the only registered
+        // service. MediaSourceResultFilter stays in the assembly but is intentionally
+        // NOT registered — media source filtering stays inactive on Jellyfin 12 until
+        // it has been re-validated against the new ABI.
         serviceCollection.AddSingleton<IIntroProvider, QualityGateIntroProvider>();
-
     }
 }
