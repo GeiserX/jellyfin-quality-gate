@@ -125,3 +125,30 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+  # Publishing the manifest must not depend on cutting a release. The Pages deploy lives in the
+  # build job, which is gated on should_release, so a manifest-only fix could never reach
+  # geiserx.github.io: on 2026-08-28 the corrected plugin GUID merged, the workflow finished in
+  # 7 seconds because v3.5.0.0 was already tagged, and the placeholder GUID stayed live. This job
+  # covers exactly the case the other one skips, so the two are mutually exclusive.
+  publish-manifest:
+    needs: [check-version]
+    if: needs.check-version.outputs.should_release == 'false'
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: .
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5
