@@ -408,6 +408,31 @@ public class ResolutionCapFilterTests : IDisposable
         AssertRefused(allowed, context);
     }
 
+    [Theory]
+    [InlineData("0")]
+    [InlineData("-1")]
+    public async Task ParamsBlob_NonPositiveMaxHeight_ClearsTheNamedOne_AndIsRefused(string positional)
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        // Jellyfin treats a non-positive MaxHeight as NO maximum, so pairing a named
+        // maxHeight=720 with a positional 0 asks the server for an uncapped stream while the
+        // request still looks negotiated. The positional value has to clear the named one.
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string>
+            {
+                ["maxHeight"] = "720",
+                ["params"] = ";;;;;;;;;;;;;" + positional,
+            });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
     [Fact]
     public async Task ParamsBlob_LoweringMaxHeightToCap_IsAllowed()
     {
@@ -909,4 +934,5 @@ public class ResolutionCapFilterTests : IDisposable
 
         Assert.Equal(Body, ReadBody(httpContext));
     }
+
 }

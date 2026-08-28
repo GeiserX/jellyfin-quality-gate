@@ -278,8 +278,9 @@ library matters. Split them and each item has a single source, so an over-cap us
 transcode instead of the version you already have on disk.
 
 The ` - label` suffix is Jellyfin's own naming requirement for merging versions, not something
-the cap reads. The cap measures each source's actual height, so the labels can say anything, or
-nothing.
+the cap reads. The suffix format has to be there or Jellyfin treats each file as a separate item,
+but the label text itself is free: the cap measures each source's actual height and never looks
+at what the label says.
 
 ## Building from Source
 

@@ -591,12 +591,16 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
             isStatic = string.Equals("true", staticParam, StringComparison.OrdinalIgnoreCase);
         }
 
+        // Jellyfin assigns params[13] straight to MaxHeight, and treats 0 (or any non-positive
+        // value) as NO maximum. Ignoring such a value would leave a named maxHeight=720 standing
+        // while the server actually applies no cap, so the request would look negotiated and
+        // sail past. A valid non-positive positional value therefore CLEARS the requested height
+        // rather than being skipped, and the item's real height is what gets enforced.
         var heightParam = GetParam(paramValues, ParamsMaxHeightIndex);
         if (!string.IsNullOrWhiteSpace(heightParam)
-            && int.TryParse(heightParam, NumberStyles.Integer, CultureInfo.InvariantCulture, out var paramHeight)
-            && paramHeight > 0)
+            && int.TryParse(heightParam, NumberStyles.Integer, CultureInfo.InvariantCulture, out var paramHeight))
         {
-            requestedHeight = paramHeight;
+            requestedHeight = paramHeight > 0 ? paramHeight : null;
         }
 
         return (isStatic, requestedHeight);
