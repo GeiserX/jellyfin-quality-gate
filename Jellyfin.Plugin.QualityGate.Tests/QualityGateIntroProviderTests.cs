@@ -19,6 +19,7 @@ using Moq;
 
 namespace Jellyfin.Plugin.QualityGate.Tests;
 
+[Collection(PluginInstanceCollection.Name)]
 public class QualityGateIntroProviderTests : IDisposable
 {
     private readonly Plugin _plugin;

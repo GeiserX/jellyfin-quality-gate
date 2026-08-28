@@ -25,6 +25,7 @@ using Moq;
 
 namespace Jellyfin.Plugin.QualityGate.Tests;
 
+[Collection(PluginInstanceCollection.Name)]
 public class ResolutionCapFilterTests : IDisposable
 {
     private const int Cap = 720;
@@ -106,24 +107,28 @@ public class ResolutionCapFilterTests : IDisposable
         SetConfig(new PluginConfiguration());
     }
 
-    private void SetItemHeight(int? height)
+    private static List<MediaStream> BuildStreams(int? height)
     {
-        var streams = new List<MediaStream>
+        return new List<MediaStream>
         {
             new MediaStream { Type = MediaStreamType.Audio },
+
+            // A null height is probed as video with no resolution recorded — the live
+            // library's null-height case.
+            new MediaStream { Type = MediaStreamType.Video, Height = height },
         };
+    }
 
-        if (height.HasValue)
-        {
-            streams.Add(new MediaStream { Type = MediaStreamType.Video, Height = height.Value });
-        }
-        else
-        {
-            // Probed as video, but with no resolution recorded — the live library's null-height case.
-            streams.Add(new MediaStream { Type = MediaStreamType.Video, Height = null });
-        }
+    /// <summary>Reports the same height for every item.</summary>
+    private void SetItemHeight(int? height)
+    {
+        _mediaSourceManagerMock.Setup(m => m.GetMediaStreams(It.IsAny<Guid>())).Returns(BuildStreams(height));
+    }
 
-        _mediaSourceManagerMock.Setup(m => m.GetMediaStreams(It.IsAny<Guid>())).Returns(streams);
+    /// <summary>Reports a height for one specific item, overriding any catch-all setup.</summary>
+    private void SetItemHeight(Guid itemId, int? height)
+    {
+        _mediaSourceManagerMock.Setup(m => m.GetMediaStreams(itemId)).Returns(BuildStreams(height));
     }
 
     private static HttpContext CreateHttpContext(
@@ -287,19 +292,22 @@ public class ResolutionCapFilterTests : IDisposable
 
     /// <summary>
     /// Chosen behaviour for an item whose height is unknown: ALLOW, and log a warning naming
-    /// the item. A null height means the server has not probed the file, which is
-    /// indistinguishable from a plugin defect; refusing would take those items away from every
-    /// restricted user at once. Negotiation still caps them, because the injected Height
+    /// the item. A null height is the library answering "never probed", a data condition
+    /// rather than a fault; refusing would take those items away from every restricted user
+    /// at once. Negotiation still caps them, because the injected Height
     /// condition is marked required and an unknown value fails a required condition.
+    /// A lookup that THROWS is a different thing entirely and is refused — see
+    /// <see cref="WhenLookupThrows_DeliveryIsRefusedAndErrorLogged"/>.
     /// </summary>
-    [Fact]
-    public async Task RestrictedUser_NullHeightItem_IsAllowedAndWarns()
+    [Theory]
+    [MemberData(nameof(DeliveryRoutes))]
+    public async Task RestrictedUser_NullHeightItem_IsAllowedAndWarns(string path)
     {
         UseCappedPolicy();
         SetItemHeight(null);
 
         var httpContext = CreateHttpContext(
-            StreamPath(),
+            path,
             userId: Guid.NewGuid(),
             queryParams: new Dictionary<string, string> { ["static"] = "true" });
 
@@ -418,15 +426,22 @@ public class ResolutionCapFilterTests : IDisposable
 
     // --- the other delivery routes ---
 
+    /// <summary>Every route that hands back media bytes or a playlist.</summary>
+    public static TheoryData<string> DeliveryRoutes => new TheoryData<string>
+    {
+        "/Videos/11111111-1111-1111-1111-111111111111/stream",
+        "/Videos/11111111-1111-1111-1111-111111111111/stream.mkv",
+        "/Videos/11111111-1111-1111-1111-111111111111/master.m3u8",
+        "/Videos/11111111-1111-1111-1111-111111111111/main.m3u8",
+        "/Videos/11111111-1111-1111-1111-111111111111/live.m3u8",
+        "/Videos/11111111-1111-1111-1111-111111111111/hls1/main/0.mp4",
+        "/Audio/11111111-1111-1111-1111-111111111111/stream",
+        "/Items/11111111-1111-1111-1111-111111111111/File",
+        "/Items/11111111-1111-1111-1111-111111111111/Download",
+    };
+
     [Theory]
-    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/master.m3u8")]
-    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/main.m3u8")]
-    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/live.m3u8")]
-    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/hls1/main/0.mp4")]
-    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/stream.mkv")]
-    [InlineData("/Audio/11111111-1111-1111-1111-111111111111/stream")]
-    [InlineData("/Items/11111111-1111-1111-1111-111111111111/File")]
-    [InlineData("/Items/11111111-1111-1111-1111-111111111111/Download")]
+    [MemberData(nameof(DeliveryRoutes))]
     public async Task OverCapItem_IsRefusedOnEveryDeliveryRoute(string path)
     {
         UseCappedPolicy();
@@ -475,8 +490,14 @@ public class ResolutionCapFilterTests : IDisposable
         AssertRefused(allowed, context);
     }
 
+    // --- which item a delivery request is measured against ---
+
+    /// <summary>
+    /// A media source id names a specific version, so it is measured — but so is the item in
+    /// the route, because which one the action serves is settled after this filter has run.
+    /// </summary>
     [Fact]
-    public async Task MediaSourceId_SelectsTheVersionBeingFetched()
+    public async Task MediaSourceId_IsMeasuredAlongsideTheRouteItem()
     {
         UseCappedPolicy();
         var versionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
@@ -494,6 +515,71 @@ public class ResolutionCapFilterTests : IDisposable
         await RunResourceAsync(httpContext);
 
         _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(versionId), Times.Once);
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(ItemId), Times.Once);
+    }
+
+    /// <summary>
+    /// The cap is enforced against the tallest candidate, so naming a small version alongside
+    /// an over-cap route item does not buy a way past it.
+    /// </summary>
+    [Theory]
+    [InlineData("mediaSourceId")]
+    [InlineData("params")]
+    public async Task StreamRoute_EnforcesAgainstTheTallestCandidate(string parameterName)
+    {
+        UseCappedPolicy();
+        var versionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        SetItemHeight(1080);
+        SetItemHeight(versionId, 480);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string>
+            {
+                ["static"] = "true",
+                [parameterName] = parameterName == "params"
+                    ? ";;" + versionId
+                    : versionId.ToString(),
+            });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    /// <summary>
+    /// /Items/{itemId}/File and /Download take no media source parameter: they always return
+    /// the file of the item in the route. The route id is therefore the only thing worth
+    /// measuring, and a caller-supplied identifier must not be able to stand in for it.
+    /// </summary>
+    [Theory]
+    [InlineData("/Items/11111111-1111-1111-1111-111111111111/File", "mediaSourceId")]
+    [InlineData("/Items/11111111-1111-1111-1111-111111111111/File", "params")]
+    [InlineData("/Items/11111111-1111-1111-1111-111111111111/Download", "mediaSourceId")]
+    [InlineData("/Items/11111111-1111-1111-1111-111111111111/Download", "params")]
+    public async Task OriginalFileRoute_MeasuresTheRouteItem_NotACallerSuppliedId(string path, string parameterName)
+    {
+        UseCappedPolicy();
+        var lowResVersionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        SetItemHeight(ItemId, 1080);
+        SetItemHeight(lowResVersionId, 480);
+
+        var httpContext = CreateHttpContext(
+            path,
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string>
+            {
+                [parameterName] = parameterName == "params"
+                    ? ";;" + lowResVersionId
+                    : lowResVersionId.ToString(),
+            });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(ItemId), Times.Once);
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(lowResVersionId), Times.Never);
     }
 
     // --- requests the filter must not touch ---
@@ -559,10 +645,16 @@ public class ResolutionCapFilterTests : IDisposable
         AssertRefused(allowed, context);
     }
 
-    // --- fail open ---
+    // --- the two halves of "the height is not a number": unknown, and unreadable ---
 
-    [Fact]
-    public async Task WhenLookupThrows_RequestIsAllowedAndErrorLogged()
+    /// <summary>
+    /// A height lookup that THROWS is a defect in this plugin, not something the library said
+    /// about the media. On a delivery route that means refusing: the request is for the bytes
+    /// themselves, and allowing it hands a capped user exactly what the cap withholds.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(DeliveryRoutes))]
+    public async Task WhenLookupThrows_DeliveryIsRefusedAndErrorLogged(string path)
     {
         UseCappedPolicy();
         _mediaSourceManagerMock
@@ -570,9 +662,31 @@ public class ResolutionCapFilterTests : IDisposable
             .Throws(new InvalidOperationException("boom"));
 
         var httpContext = CreateHttpContext(
-            StreamPath(),
+            path,
             userId: Guid.NewGuid(),
             queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+        AssertLoggedAtLeastOnce(LogLevel.Error);
+    }
+
+    /// <summary>
+    /// Negotiation keeps failing open. Nothing is being delivered yet, and a defect here must
+    /// not take playback away from everyone.
+    /// </summary>
+    [Fact]
+    public async Task WhenNegotiationThrows_RequestIsAllowedAndErrorLogged()
+    {
+        UseCappedPolicy();
+
+        var httpContext = CreatePlaybackInfoPost(
+            Guid.NewGuid(),
+            "{\"DeviceProfile\":{\"DirectPlayProfiles\":[]}}");
+
+        // A body the filter cannot read: reading it throws rather than returning JSON.
+        httpContext.Request.Body.Dispose();
 
         var (allowed, context) = await RunResourceAsync(httpContext);
 

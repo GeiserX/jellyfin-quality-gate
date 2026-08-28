@@ -54,10 +54,15 @@ namespace Jellyfin.Plugin.QualityGate.Filters;
 /// agent, device id and play session id — so a request cannot be mapped back to an item and
 /// this filter has nothing to check. It can only return segments that already exist in the
 /// transcode folder, which for a restricted user are segments this filter already capped.
+/// README.md records it as an accepted, known bypass and what closing it would take.
 ///
-/// The filter fails OPEN. Anything it cannot evaluate — an unreadable body, an item it cannot
-/// resolve, an unexpected exception — is logged and allowed, because a plugin defect must not
-/// take playback away from everyone.
+/// The filter fails OPEN everywhere except one place. An unreadable body, an item it cannot
+/// resolve or an unexpected exception is logged and allowed, because a plugin defect must not
+/// take playback away from everyone. The one place it does not is a delivery request from a
+/// user the filter has already established is capped: there it fails CLOSED. By then the only
+/// question left is how tall the media is, so a throw is a defect in this plugin rather than
+/// something the library said, and allowing the request would hand over exactly the bytes the
+/// cap exists to withhold.
 /// </summary>
 public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
 {
@@ -120,7 +125,22 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
                 {
                     if (isDelivery)
                     {
-                        refuse = ShouldRefuseDelivery(context.HttpContext, policy, userId, path);
+                        try
+                        {
+                            refuse = ShouldRefuseDelivery(context.HttpContext, policy, userId, path);
+                        }
+                        catch (Exception ex)
+                        {
+                            // Fail closed: a capped user is asking for bytes and the gate could
+                            // not finish deciding. That is a defect here, not a property of the
+                            // media, and letting it through delivers the original.
+                            _logger.LogError(
+                                ex,
+                                "QualityGate: the {Cap}p cap could not be evaluated for {Path} — refusing the request",
+                                policy.MaxHeight,
+                                path);
+                            refuse = true;
+                        }
                     }
                     else
                     {
@@ -230,16 +250,31 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
     /// <returns>True when the request must be answered with 403.</returns>
     internal bool ShouldRefuseDelivery(HttpContext httpContext, QualityPolicy policy, Guid userId, string path)
     {
-        var itemId = ResolveDeliveryItemId(httpContext, path);
-        if (itemId == Guid.Empty)
+        var itemIds = ResolveDeliveryItemIds(httpContext, path);
+        if (itemIds.Count == 0)
         {
-            // Cannot tell what is being fetched — fail open rather than guess.
+            // Cannot tell what is being fetched — fail open rather than guess. Every gated
+            // route binds a Guid itemId, so a request that gets here carries no id MVC could
+            // have bound either, and the action will refuse it before it delivers anything.
             _logger.LogWarning(
                 "QualityGate: could not resolve an item id for {Path} — allowing the request", path);
             return false;
         }
 
-        var height = GetItemVideoHeight(itemId);
+        // Measure every candidate and judge the request by the tallest of them: which one the
+        // action ends up serving is decided after this filter has run.
+        var itemId = itemIds[0];
+        int? height = null;
+        foreach (var candidate in itemIds)
+        {
+            var candidateHeight = GetItemVideoHeight(candidate);
+            if (candidateHeight.HasValue && (!height.HasValue || candidateHeight.Value > height.Value))
+            {
+                height = candidateHeight;
+                itemId = candidate;
+            }
+        }
+
         if (!QualityGateService.ExceedsHeightCap(policy, height))
         {
             if (!height.HasValue)
@@ -378,28 +413,64 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
     }
 
     /// <summary>
-    /// Identifies which item's bytes a delivery request is asking for.
-    /// A media source id names the exact version being fetched and wins over the route item
-    /// id, because an alternate version is a separate item with its own resolution.
+    /// Identifies every item whose bytes a delivery request could be asking for.
+    ///
+    /// On /Items/{itemId}/File and /Items/{itemId}/Download the route id is the only answer.
+    /// Those actions take no media source parameter at all: they return the file of the item
+    /// named in the route, whatever else the query says. Measuring a caller-supplied
+    /// <c>mediaSourceId</c> there would let a capped user name a 480p sibling and be handed
+    /// the 4K original.
+    ///
+    /// Every other delivery route can be pointed at a specific version, and which identifier
+    /// the action settles on is decided after this filter has run — the legacy <c>params</c>
+    /// blob is applied inside the action and overrides the bound media source id. So all the
+    /// candidates are measured and the tallest one decides, which holds the cap whichever the
+    /// action picks.
     /// </summary>
-    private static Guid ResolveDeliveryItemId(HttpContext httpContext, string path)
+    /// <param name="httpContext">The request context.</param>
+    /// <param name="path">The request path.</param>
+    /// <returns>The distinct item ids the request could resolve to, in the order they were found.</returns>
+    private static IReadOnlyList<Guid> ResolveDeliveryItemIds(HttpContext httpContext, string path)
     {
+        var routeItemId = ResolveRouteItemId(httpContext, path);
+
+        if (IsOriginalFileRequest(path))
+        {
+            return routeItemId == Guid.Empty ? Array.Empty<Guid>() : new[] { routeItemId };
+        }
+
+        var itemIds = new List<Guid>();
         var query = httpContext.Request.Query;
 
-        // The params blob is applied inside the action and overrides the bound media source id,
-        // so it has to be read here too or the wrong item would be measured.
-        var paramValues = ReadParams(query);
-        if (TryGetGuid(GetParam(paramValues, ParamsMediaSourceIdIndex), out var paramSourceId))
+        if (TryGetGuid(GetParam(ReadParams(query), ParamsMediaSourceIdIndex), out var paramSourceId))
         {
-            return paramSourceId;
+            itemIds.Add(paramSourceId);
         }
 
         if (query.TryGetValue("mediaSourceId", out var mediaSourceId)
-            && TryGetGuid(mediaSourceId.FirstOrDefault(), out var sourceId))
+            && TryGetGuid(mediaSourceId.FirstOrDefault(), out var sourceId)
+            && !itemIds.Contains(sourceId))
         {
-            return sourceId;
+            itemIds.Add(sourceId);
         }
 
+        if (routeItemId != Guid.Empty && !itemIds.Contains(routeItemId))
+        {
+            itemIds.Add(routeItemId);
+        }
+
+        return itemIds;
+    }
+
+    /// <summary>
+    /// Reads the item id the route itself carries, from the bound route values when they are
+    /// available and otherwise from the path.
+    /// </summary>
+    /// <param name="httpContext">The request context.</param>
+    /// <param name="path">The request path.</param>
+    /// <returns>The route's item id, or <see cref="Guid.Empty"/> when it carries none.</returns>
+    private static Guid ResolveRouteItemId(HttpContext httpContext, string path)
+    {
         if (httpContext.Request.RouteValues.TryGetValue("itemId", out var routeItemId)
             && TryGetGuid(routeItemId?.ToString(), out var itemId))
         {

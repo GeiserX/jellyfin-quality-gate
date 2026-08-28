@@ -11,6 +11,7 @@ using Moq;
 
 namespace Jellyfin.Plugin.QualityGate.Tests;
 
+[Collection(PluginInstanceCollection.Name)]
 public class FallbackTranscodeTests : IDisposable
 {
     private readonly Plugin _plugin;

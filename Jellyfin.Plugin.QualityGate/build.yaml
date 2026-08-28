@@ -20,7 +20,8 @@ changelog: |
   - Media with no probed height is allowed and logged as a warning; negotiation still transcodes it at the cap
   ## v3.4.0.0
   - Intro-only build for Jellyfin 12: targets ABI 12.0.0.0 on net10.0 (12.0.0-rc5 packages)
-  - MediaSourceResultFilter and the QualityGate API controller are no longer registered/shipped; per-policy intro videos and the admin page remain
+  - The QualityGate API controller was deleted; MediaSourceResultFilter is no longer registered or active, so filename patterns restrict nothing (the type stays in the assembly, inert)
+  - Per-policy intro videos and the admin page remain
   ## v3.2.0.0
   - BREAKING: removed path-prefix support entirely (filename regex patterns only)
   - Fail-closed default policy: broken/disabled DefaultPolicyId now denies instead of granting full access

@@ -63,20 +63,42 @@ It covers both ways video leaves the server:
 - **Direct delivery**: 403 on `/Videos/{id}/stream`, `stream.{container}`,
   `master|main|live.m3u8`, `hls1/…`, `/Audio/{id}/stream` and `/Items/{id}/File|Download`
   when the item is over the cap and the request wants the bytes as-is or an uncapped transcode.
+  On `/Items/{id}/File|Download` the route's own id is the only thing measured. Those actions
+  take no media source parameter, so a caller-supplied `mediaSourceId` naming a small version
+  must not stand in for it. On every other delivery route the filter measures each candidate id
+  (`params` index 2, `mediaSourceId`, the route id) and the tallest decides, because the action
+  settles on one of them after the filter has run.
 
-The older **MediaSourceResultFilter** (filename patterns) stays in the assembly, **unregistered**.
-It uses an `IAsyncResultFilter` registered via `PostConfigure<MvcOptions>`. This intercepts Jellyfin API responses _before_ serialization, removing blocked MediaSources from:
+One route is deliberately not covered: the legacy HLS segment route
+`/Videos/{id}/hls/{playlistId}/{segmentId}.{container}`, whose `itemId` is declared and never
+read. [README.md](README.md#known-bypass-the-legacy-hls-segment-route) records it as an
+accepted, known bypass and what closing it would take.
+
+The filter fails open everywhere except one place. A delivery request from a user it has
+already established is capped fails **closed**: by then the only open question is how tall the
+media is, so a throw is a defect here rather than something the library said, and allowing the
+request would hand over the bytes the cap exists to withhold. A height the library reports as
+*unknown* (never probed) is a data condition rather than a defect. It is allowed and logged as
+a warning, and negotiation still caps it.
+
+**MediaSourceResultFilter** is present in the assembly but not registered. Nothing constructs
+it and nothing adds it to `MvcOptions`, so on Jellyfin 12 it never runs and filename patterns
+restrict nothing. It stays only so the older behaviour is still readable in one place.
+
+The rest of this section is legacy: how that filter behaved on Jellyfin 10.x, when
+`PostConfigure<MvcOptions>` registered it. It intercepted API responses _before_
+serialization, removing blocked MediaSources from:
 
 - `PlaybackInfoResponse` (playback endpoint)
 - `BaseItemDto` (item detail / user item endpoints)
 - `QueryResult<BaseItemDto>` (library listing endpoints)
 - `IEnumerable<BaseItemDto>` (lazy enumerables from `/Items/Latest` and similar)
 
-Items where **all** media sources are blocked are hidden entirely from listings (not just stripped of sources), unless the policy has **fallback transcode** enabled — in that case, the original sources are kept but forced through server-side transcoding at the configured resolution cap.
+Items where **all** media sources were blocked were hidden entirely from listings (not just stripped of sources), unless the policy had **fallback transcode** enabled — in that case, the original sources were kept but forced through server-side transcoding at the configured resolution cap.
 
-The filter gates on `isRelevant` to avoid running on every request — it only processes `/PlaybackInfo`, `/Users/{id}/Items/...`, and `/Users/{id}/Items` paths (excluding `/Intros`).
+The filter gated on `isRelevant` to avoid running on every request — it only processed `/PlaybackInfo`, `/Users/{id}/Items/...`, and `/Users/{id}/Items` paths (excluding `/Intros`).
 
-This approach was chosen because Jellyfin's response compression breaks HTTP middleware approaches (middleware sees compressed bytes, not JSON).
+A result filter beat middleware because Jellyfin's response compression breaks HTTP middleware approaches (middleware sees compressed bytes, not JSON).
 
 ### Policy Resolution
 
@@ -89,7 +111,13 @@ This approach was chosen because Jellyfin's response compression breaks HTTP mid
 5. If `DefaultPolicyId` is set but policy not found/disabled, return **deny-all sentinel** (fail-closed)
 6. If no default, return null (full access)
 
-### Filename Matching
+### Filename Matching (legacy)
+
+This restricts nothing on Jellyfin 12. The filter that enforced it,
+`MediaSourceResultFilter`, is no longer registered. The one live caller left is
+`QualityGateIntroProvider`, which uses it to decide whether to skip an intro for an item the
+user could not have played anyway. It removes no media sources. The pattern fields stay in the
+config and the admin page as inert settings.
 
 `QualityGateService.IsPathAllowed(policy, path)` checks both the original path and symlink-resolved path:
 
