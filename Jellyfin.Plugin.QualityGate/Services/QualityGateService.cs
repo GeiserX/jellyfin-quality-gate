@@ -6,6 +6,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Jellyfin.Plugin.QualityGate.Configuration;
 using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Entities;
 
 namespace Jellyfin.Plugin.QualityGate.Services;
 
@@ -73,6 +74,87 @@ public static class QualityGateService
 
         // No policy applies - full access
         return null;
+    }
+
+    /// <summary>
+    /// Checks whether the policy caps the resolution a user may be served.
+    /// </summary>
+    /// <param name="policy">The quality policy.</param>
+    /// <returns>True when <see cref="QualityPolicy.MaxHeight"/> is set to a positive height.</returns>
+    public static bool HasHeightCap(QualityPolicy? policy)
+    {
+        return policy != null && policy.MaxHeight > 0;
+    }
+
+    /// <summary>
+    /// Gets the height of the tallest video stream in a set of media streams.
+    /// Audio, subtitle and embedded-image streams are ignored.
+    /// </summary>
+    /// <param name="streams">The media streams to inspect.</param>
+    /// <returns>The video height in pixels, or null when no video stream reports one.</returns>
+    public static int? GetVideoHeight(IEnumerable<MediaStream>? streams)
+    {
+        if (streams == null)
+        {
+            return null;
+        }
+
+        int? tallest = null;
+        foreach (var stream in streams)
+        {
+            if (stream == null || stream.Type != MediaStreamType.Video || !stream.Height.HasValue)
+            {
+                continue;
+            }
+
+            if (!tallest.HasValue || stream.Height.Value > tallest.Value)
+            {
+                tallest = stream.Height.Value;
+            }
+        }
+
+        return tallest;
+    }
+
+    /// <summary>
+    /// Gets the height of the tallest video stream in a media source.
+    /// </summary>
+    /// <param name="source">The media source.</param>
+    /// <returns>The video height in pixels, or null when the source reports none.</returns>
+    public static int? GetVideoHeight(MediaSourceInfo? source)
+    {
+        return source == null ? null : GetVideoHeight(source.MediaStreams);
+    }
+
+    /// <summary>
+    /// Determines whether a given media height breaks the policy's resolution cap.
+    /// </summary>
+    /// <remarks>
+    /// An unknown height (null) does NOT exceed the cap. Height comes from the server's own
+    /// ffprobe metadata, so a null means the item has not been probed rather than that the
+    /// media is oversized — treating that as a violation would block items nobody can
+    /// distinguish from a plugin bug. Unknown-height items are still capped in practice,
+    /// because the height condition the plugin injects into the negotiated DeviceProfile is
+    /// marked required and an unknown height fails a required condition, which pushes the
+    /// item through a capped transcode instead of direct play.
+    /// </remarks>
+    /// <param name="policy">The quality policy.</param>
+    /// <param name="height">The media height in pixels, or null when unknown.</param>
+    /// <returns>True only when the policy caps height, the height is known, and it is above the cap.</returns>
+    public static bool ExceedsHeightCap(QualityPolicy? policy, int? height)
+    {
+        return HasHeightCap(policy) && height.HasValue && height.Value > policy!.MaxHeight;
+    }
+
+    /// <summary>
+    /// Determines whether a media source breaks the policy's resolution cap.
+    /// </summary>
+    /// <param name="policy">The quality policy.</param>
+    /// <param name="source">The media source.</param>
+    /// <returns>True when the source's video height is known and above the cap.</returns>
+    public static bool ExceedsHeightCap(QualityPolicy? policy, MediaSourceInfo? source)
+    {
+        return ExceedsHeightCap(policy, GetVideoHeight(source));
     }
 
     /// <summary>

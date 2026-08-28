@@ -203,6 +203,75 @@ function getEmptyState(message) {
         '</p></div>';
 }
 
+/** The heights the resolution dropdowns offer out of the box. */
+var HEIGHT_PRESETS = [480, 720, 1080, 1440, 2160];
+
+/**
+ * Reads a configured height as a whole number of pixels.
+ * Anything missing, unparseable or not positive means "no cap", the same as the server's 0.
+ */
+export function toHeight(value) {
+    var height = parseInt(value, 10);
+
+    return isFinite(height) && height > 0 ? height : 0;
+}
+
+/**
+ * The heights a resolution dropdown must offer for an already-configured value.
+ *
+ * MaxHeight is a plain int on the server and nothing holds it to the presets: a config
+ * written by hand, by an older build or by a future one can say 1000. A dropdown with no
+ * option for it would leave the browser on its first option, and the next save would write
+ * that back — silently lifting the cap from every user on the policy. So the configured
+ * value is always in the list, whatever it is.
+ */
+export function heightChoices(configured) {
+    var height = toHeight(configured);
+    var choices = HEIGHT_PRESETS.slice();
+
+    if (height > 0 && choices.indexOf(height) === -1) {
+        choices.push(height);
+        choices.sort(function (a, b) {
+            return a - b;
+        });
+    }
+
+    return choices;
+}
+
+function getHeightLabel(height) {
+    return height === 2160 ? '4K' : height + 'p';
+}
+
+function buildOption(value, label, selected) {
+    return '<option value="' + value + '"' + (selected ? ' selected' : '') + '>' + label + '</option>';
+}
+
+/** Builds the Maximum Resolution options, with the policy's own height always among them. */
+export function buildMaxHeightOptions(configured) {
+    var selected = toHeight(configured);
+    var html = buildOption(0, 'No limit', selected === 0);
+
+    heightChoices(configured).forEach(function (height) {
+        html += buildOption(height, getHeightLabel(height), height === selected);
+    });
+
+    return html;
+}
+
+/** Builds the If No Match Found options, with the policy's own fallback height always among them. */
+export function buildFallbackOptions(policy) {
+    var enabled = !!policy.FallbackTranscode;
+    var selected = toHeight(policy.FallbackMaxHeight);
+    var html = buildOption('off', 'Block playback', !enabled);
+
+    heightChoices(policy.FallbackMaxHeight).forEach(function (height) {
+        html += buildOption(height, 'Transcode to ' + getHeightLabel(height), enabled && height === selected);
+    });
+
+    return html + buildOption(0, 'Transcode (no resolution cap)', enabled && selected === 0);
+}
+
 function buildPathField(policy, policyIndex, listName) {
     var key = getFieldKey(listName);
     var rows = getPathRows(policy[key] || []);
@@ -442,6 +511,13 @@ function renderPolicies(view) {
             '<div class="qg-policy-section">' +
                 '<h3 class="qg-policy-section-title">Playback Behavior</h3>' +
                 '<div class="qg-policy-footer">' +
+                    '<div class="selectContainer qg-policy-maxheight-field">' +
+                        '<label class="selectLabel" for="policy-maxheight-' + index + '">Maximum Resolution</label>' +
+                        '<select is="emby-select" id="policy-maxheight-' + index + '" class="emby-select policy-max-height">' +
+                            buildMaxHeightOptions(policy.MaxHeight) +
+                        '</select>' +
+                        '<div class="fieldDescription">Measured against the media\'s actual height, not its filename. Anything taller is served as a transcode capped here, and a request for the original is refused. "No limit" leaves playback untouched.</div>' +
+                    '</div>' +
                     '<div class="inputContainer qg-policy-intro-field">' +
                         '<label class="inputLabel inputLabelUnfocused" for="' + introId + '">Custom Intro Video</label>' +
                         '<input type="text" id="' + introId + '" class="emby-input policy-intro" ' +
@@ -452,13 +528,7 @@ function renderPolicies(view) {
                     '<div class="selectContainer qg-policy-fallback-field">' +
                         '<label class="selectLabel" for="policy-fallback-' + index + '">If No Match Found</label>' +
                         '<select is="emby-select" id="policy-fallback-' + index + '" class="emby-select policy-fallback-mode">' +
-                            '<option value="off"' + (!policy.FallbackTranscode ? ' selected' : '') + '>Block playback</option>' +
-                            '<option value="480"' + (policy.FallbackTranscode && policy.FallbackMaxHeight === 480 ? ' selected' : '') + '>Transcode to 480p</option>' +
-                            '<option value="720"' + (policy.FallbackTranscode && policy.FallbackMaxHeight === 720 ? ' selected' : '') + '>Transcode to 720p</option>' +
-                            '<option value="1080"' + (policy.FallbackTranscode && policy.FallbackMaxHeight === 1080 ? ' selected' : '') + '>Transcode to 1080p</option>' +
-                            '<option value="1440"' + (policy.FallbackTranscode && policy.FallbackMaxHeight === 1440 ? ' selected' : '') + '>Transcode to 1440p</option>' +
-                            '<option value="2160"' + (policy.FallbackTranscode && policy.FallbackMaxHeight === 2160 ? ' selected' : '') + '>Transcode to 4K</option>' +
-                            '<option value="0"' + (policy.FallbackTranscode && policy.FallbackMaxHeight === 0 ? ' selected' : '') + '>Transcode (no resolution cap)</option>' +
+                            buildFallbackOptions(policy) +
                         '</select>' +
                         '<div class="fieldDescription">When no file matches the allowed patterns, transcode at the selected resolution instead of blocking.</div>' +
                     '</div>' +
@@ -779,9 +849,10 @@ function collectFromDOM(view) {
             }
         ).filter(Boolean);
         config.Policies[index].IntroVideoPath = card.querySelector('.policy-intro').value.trim();
+        config.Policies[index].MaxHeight = toHeight(card.querySelector('.policy-max-height').value);
         var fallbackVal = card.querySelector('.policy-fallback-mode').value;
         config.Policies[index].FallbackTranscode = fallbackVal !== 'off';
-        config.Policies[index].FallbackMaxHeight = fallbackVal !== 'off' ? parseInt(fallbackVal, 10) : 0;
+        config.Policies[index].FallbackMaxHeight = fallbackVal !== 'off' ? toHeight(fallbackVal) : 0;
         config.Policies[index].FallbackMaxBitrateKbps = parseInt(card.querySelector('.policy-fallback-bitrate').value, 10) || 0;
         config.Policies[index].Enabled = card.querySelector('.policy-enabled').checked;
     });
@@ -818,6 +889,7 @@ function addPolicy(view) {
         AllowedFilenamePatterns: [],
         BlockedFilenamePatterns: [],
         Enabled: true,
+        MaxHeight: 0,
         FallbackTranscode: false,
         FallbackMaxHeight: 0,
         FallbackMaxBitrateKbps: 0,
@@ -930,6 +1002,7 @@ function loadConfig(view) {
         config.Policies.forEach(function (policy) {
             policy.AllowedFilenamePatterns = policy.AllowedFilenamePatterns || [];
             policy.BlockedFilenamePatterns = policy.BlockedFilenamePatterns || [];
+            policy.MaxHeight = policy.MaxHeight || 0;
             policy.FallbackTranscode = policy.FallbackTranscode || false;
             policy.FallbackMaxHeight = policy.FallbackMaxHeight || 0;
             policy.FallbackMaxBitrateKbps = policy.FallbackMaxBitrateKbps || 0;

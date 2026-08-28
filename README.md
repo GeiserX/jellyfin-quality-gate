@@ -15,18 +15,22 @@
 
 <p align="center"><strong>Intelligent media access control for Jellyfin</strong></p>
 
-> **v3.4.0.0 is an intro-only build for Jellyfin 12.** Only the per-policy intro provider is registered; media source filtering (and the `/QualityGate` API) is not active until it has been re-validated against the Jellyfin 12 ABI. Policies and user assignments in the admin page keep working and drive intro selection. For version filtering on Jellyfin 12, use separate libraries per quality tier with Jellyfin's built-in Library Access settings.
+> **v3.5.0.0 enforces a resolution cap on Jellyfin 12.** The cap is measured against the media's actual height, read from the item's video stream, so it holds whatever the file is called. Set **Maximum Resolution** on a policy to switch it on; the default, **No limit**, leaves playback exactly as it is, so upgrading changes nothing until you choose a height.
+>
+> Filename regex patterns still exist in the config and still describe the older `MediaSourceResultFilter`, which stays unregistered on Jellyfin 12. They do **not** drive the resolution cap. A pattern like `- 720p` matches nothing when the served path keeps the original name — which is exactly why the cap is measured, not read off the filename.
 
 ---
 
 ## Features
 
-- **Filename Regex Patterns** -- Match against filenames with regex for [Jellyfin multi-version](https://jellyfin.org/docs/general/server/media/movies/#multiple-versions) setups
+- **Resolution Cap** -- Cap a user at 480p/720p/1080p/1440p/4K, measured against the media's real height
+- **Covers Both Playback Paths** -- Applies during negotiation and refuses the direct stream, HLS and original-file routes that skip it
+- **Filename Regex Patterns** -- Legacy Jellyfin 10.x matching for [multi-version](https://jellyfin.org/docs/general/server/media/movies/#multiple-versions) setups. Still editable, but inert on Jellyfin 12: the filter that enforced it is no longer registered, so patterns restrict nothing
 - **Per-User Assignments** -- Assign different policies to different users
 - **Web Configuration** -- Easy-to-use admin interface in Jellyfin dashboard
 - **Multi-Version Support** -- Seamlessly filter available media versions per user
 - **Custom Intros** -- Optional intro video per policy (e.g. a "lite" branding for restricted users)
-- **Dangling Symlink Protection** -- Sources whose files don't exist on disk are automatically hidden
+- **Dangling Symlink Protection** -- Legacy Jellyfin 10.x behaviour: sources whose files were missing on disk were hidden. Inert on Jellyfin 12 for the same reason as the patterns above
 - **Detailed Logging** -- Full audit trail of access decisions
 
 ## Use Cases
@@ -123,13 +127,14 @@ Navigate to **Dashboard > Quality Gate** to configure the plugin.
 
 ### Step 1: Create Policies
 
-Policies define which filename patterns are allowed or blocked. Click **"Add Policy"** to create one.
+A policy caps the resolution its users may be served. Click **"Add Policy"** to create one.
 
 | Field | Description |
 |-------|-------------|
 | **Policy Name** | A descriptive name (e.g., "720p Only", "No 4K") |
-| **Allowed Filename Patterns** | Regex patterns matched against the filename. Files must match at least one pattern. |
-| **Blocked Filename Patterns** | Regex patterns matched against the filename. Matching files are always blocked. |
+| **Maximum Resolution** | The tallest video a user under this policy may be served. Measured against the media's actual height, not its filename. `No limit` (the default) disables the cap. **This is the field that restricts anything.** |
+| **Allowed Filename Patterns** | Legacy (Jellyfin 10.x). Regex matched against the filename; files had to match at least one. Inert on Jellyfin 12, so it restricts nothing. |
+| **Blocked Filename Patterns** | Legacy (Jellyfin 10.x). Regex matched against the filename; matching files were blocked. Inert on Jellyfin 12, so it restricts nothing. |
 | **Custom Intro Video** | Optional intro video for users under this policy. Disable the built-in "Local Intros" plugin if you only want Quality Gate intros. |
 | **Enabled** | Toggle policy on/off |
 
@@ -152,60 +157,59 @@ If an override or the default policy points to a deleted or disabled policy, the
 
 ### Policy Logic
 
-Evaluation order:
+The plugin judges a policy on the media's height, taken from the item's video stream:
 
-1. **Blocked Filename Patterns**: If filename matches any blocked regex -- **BLOCKED**
-2. **Allowed Filename Patterns**: If defined and filename doesn't match any -- **BLOCKED**
-3. **File existence**: If the file doesn't exist on disk (dangling symlink) -- **BLOCKED**
-4. Otherwise -- **ALLOWED**
+1. **No height cap** (`No limit`, the default) -- nothing is restricted
+2. **Height at or below the cap** -- **ALLOWED**, untouched
+3. **Height above the cap** -- a version within the cap is offered instead if the item has one, otherwise a transcode capped at that height. A request for the original bytes is refused with 403.
+4. **Height unknown** (never probed) -- allowed and logged; negotiation still transcodes it at the cap
 
-| Allowed Pattern | Blocked Pattern | Filename | Result |
-|-----------------|-----------------|----------|--------|
-| `- 720p` | -- | `Movie (2021) - 720p.mkv` | Allowed |
-| `- 720p` | -- | `Movie (2021) - 2160p.mkv` | Blocked |
-| (empty) | `- 2160p\|- 4K` | `Movie (2021) - 1080p.mkv` | Allowed |
-| (empty) | `- 2160p\|- 4K` | `Movie (2021) - 2160p.mkv` | Blocked |
+| Maximum Resolution | Media height | Result |
+|--------------------|--------------|--------|
+| `No limit` | 2160p | Allowed, untouched |
+| 720p | 720p | Allowed, untouched |
+| 720p | 1080p, and a 720p version exists | The 720p version is offered |
+| 720p | 1080p, no smaller version | Transcoded to 720p; the original file is refused |
 
-> **Tip**: Patterns are case-insensitive regex with a 1-second timeout to prevent ReDoS. Jellyfin also supports bracketed labels (e.g. `Movie (2021) - [1080p].mkv`), so use `\[?1080p\]?` to match both formats.
+#### Filename patterns (legacy)
+
+The **Allowed** and **Blocked Filename Patterns** fields are Jellyfin 10.x behaviour. On
+Jellyfin 12 they are inert: the filter that read them, `MediaSourceResultFilter`, is present
+in the assembly but no longer registered, so a pattern blocks nothing. They are kept in the
+config so upgrading from 10.x does not throw away settings you may still want. The old order
+was: a blocked-pattern match blocked the file; allowed patterns defined and none matching
+blocked it; a file missing on disk (a dangling symlink) blocked it; anything else was allowed.
+
+Nothing about a filename restricts anything today, and that is the point. On a library whose
+lower-quality tree symlinks to the originals under their own names, the label a pattern needs
+is not in the path the server stores. Height is.
 
 ---
 
 ## Examples
 
-### Restrict to 720p Only
+### Restrict to 720p
 
 ```text
 Policy Name: 720p Only
-Allowed Filename Patterns:
-  - 720p
+Maximum Resolution: 720p
 ```
 
-Only files with `- 720p` in the filename are visible.
+Anything taller is served as a 720p transcode, or as the item's own 720p version if it has
+one. The original file is refused.
 
 ### Block 4K Content
 
 ```text
 Policy Name: No 4K
-Blocked Filename Patterns:
-  - 2160p
-  - 4K
+Maximum Resolution: 1080p
 ```
 
-Everything is visible except 4K versions.
-
-### Standard Quality (1080p max)
-
-```text
-Policy Name: Standard
-Blocked Filename Patterns:
-  - 2160p
-  - 4K
-  - Remux
-```
+4K sources are never delivered as they are; 1080p and below play untouched.
 
 ### Tiered Access
 
-1. Create **"Standard"** policy (block 4K as above)
+1. Create a **"Standard"** policy with **Maximum Resolution** 1080p
 2. Set **Default Policy** to "Standard"
 3. Add **Full Access** overrides for premium users
 
@@ -213,13 +217,48 @@ Blocked Filename Patterns:
 
 ## How It Works
 
-1. **Result Filter**: The plugin uses an ASP.NET Core `IAsyncResultFilter` that intercepts API responses **before serialization**, operating on C# objects directly.
+The resolution cap is an ASP.NET Core MVC filter registered through `PostConfigure<MvcOptions>`, so it is still on the filter collection after Jellyfin's own MVC setup has run. It works in two phases, because there are two ways to get video out of Jellyfin and covering only one leaves the other open.
 
-2. **MediaSource Filtering**: When Jellyfin returns media sources/versions to the client, the filter removes blocked versions so they don't appear in the UI.
+1. **Negotiation** (`POST /Items/{id}/PlaybackInfo`): before model binding, the filter adds a required `Height <= cap` video condition to the DeviceProfile in the request body. Jellyfin's `StreamBuilder` turns a failed Height condition into `VideoResolutionNotSupported`, which rules out direct play, and maps the same condition onto the transcode's own `MaxHeight`. On the way back out, the filter checks the response itself: an over-cap source is dropped when a source within the cap exists, so the lower-resolution version of the item is offered instead; when every source is over the cap they are kept but marked transcode-only.
 
-3. **Filename Matching**: Each media version's filename is matched against your policy's regex patterns. For symlinked files, both the symlink filename and the resolved target filename are checked.
+2. **Direct delivery**: `GET /Videos/{id}/stream`, `stream.{container}`, `master.m3u8`, `main.m3u8`, `live.m3u8`, `hls1` segments, `/Audio/{id}/stream` and `/Items/{id}/File` and `/Download` are separate endpoints a client can call without negotiating at all — and the GET form of `PlaybackInfo` applies no limits. The filter answers 403 when the item is over the cap and the request asks for the bytes as they are, or for a transcode not held to the cap. A properly negotiated request carries `MaxHeight` at or below the cap and passes untouched. The legacy `params` query blob is parsed too, because Jellyfin applies its positional fields *inside* the action and they would otherwise overwrite the static flag and the max height after the filter had looked.
 
-4. **File Existence**: Sources whose files don't exist on disk (e.g. dangling symlinks from in-progress transcodes) are automatically hidden, preventing playback errors.
+3. **Which item gets measured**: on `/Items/{id}/File` and `/Download` it is the item in the route, always. Those actions take no media source parameter. They return that item's file whatever else the query says, so a `mediaSourceId` naming a 480p sibling cannot stand in for it. The other delivery routes really can name a specific version, and the action settles on one of the identifiers after the filter has run, so the filter measures every candidate and the tallest one decides.
+
+4. **Unknown heights**: an item with no probed height is allowed and logged as a warning naming the item. A null height is the library saying it never probed the file, a data condition rather than a fault. Negotiation still holds those items to the cap, because the injected Height condition is marked required and an unknown value fails a required condition.
+
+5. **Failing open, and the one place it does not**: anything the filter cannot evaluate is logged and allowed, because a defect here must never take playback away from everyone. The one place it does not is a delivery request from a user it has already established is capped. By then the only open question is how tall the media is. A throw there is a defect in the plugin rather than something the library said, and letting the request through would hand over the bytes the cap exists to withhold, so the filter refuses and logs an error.
+
+### Known bypass: the legacy HLS segment route
+
+`GET /Videos/{itemId}/hls/{playlistId}/{segmentId}.{container}` is **not** gated. This is an
+accepted limitation, recorded here rather than fixed.
+
+Jellyfin's legacy action declares `itemId` and never reads it. It finds the segment file by
+`segmentId` alone, an MD5 over the media path, user agent, device id and play session id. So a
+request carries nothing that maps back to an item, and there is no height to compare against
+the cap. The plugin cannot enforce what it cannot identify.
+
+A segment could reach a restricted account only if all of these hold at once:
+
+1. An over-cap transcode has already been produced and its segments are still in the transcode
+   folder. Jellyfin deletes them when the session ends, so the window is that session's life.
+2. Someone entitled to it started that transcode: an unrestricted user, or the same user
+   before their policy was tightened. A capped user cannot start an over-cap transcode now,
+   because the routes that would (`/PlaybackInfo`, `stream`, `master.m3u8`, `hls1/…`) are gated.
+3. The caller reproduces the exact segment file name, which means the MD5 above over values
+   belonging to that other session.
+4. The caller is authenticated. The route sits behind Jellyfin's `[Authorize]`.
+
+The practical risk is low. An authenticated user would have to guess an MD5 built from a media
+path and another session's device id and play session id, inside the window where that
+session's output is still on disk, and the prize is a segment of someone else's transcode
+rather than the original file. Modern clients never use this route; it exists for legacy ones.
+
+**Mitigation.** An installation that wants it closed can block `/Videos/*/hls/*` at the reverse
+proxy, with no effect on current clients. Closing it inside the plugin needs transcode-start
+tracking: record the play session, item and negotiated height when a transcode begins, then
+match each segment request against that. It is tracked as future work.
 
 ### Library Setup
 
@@ -233,7 +272,15 @@ movies/
     Movie (2021) - 720p.mkv
 ```
 
-Jellyfin merges these into a single item with multiple MediaSources. The plugin then filters which sources each user can see.
+Jellyfin merges these into a single item with several MediaSources, and the cap picks between
+them, handing a user capped at 720p the 720p source instead of the 2160p one. That is why one
+library matters. Split them and each item has a single source, so an over-cap user gets a
+transcode instead of the version you already have on disk.
+
+The ` - label` suffix is Jellyfin's own naming requirement for merging versions, not something
+the cap reads. The suffix format has to be there or Jellyfin treats each file as a separate item,
+but the label text itself is free: the cap measures each source's actual height and never looks
+at what the label says.
 
 ## Building from Source
 

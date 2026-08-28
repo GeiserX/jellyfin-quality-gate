@@ -26,6 +26,7 @@ using Moq;
 
 namespace Jellyfin.Plugin.QualityGate.Tests;
 
+[Collection(PluginInstanceCollection.Name)]
 public class MediaSourceResultFilterTests : IDisposable
 {
     private readonly Plugin _plugin;

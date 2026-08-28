@@ -12,6 +12,7 @@ namespace Jellyfin.Plugin.QualityGate.Tests;
 /// <summary>
 /// Additional tests for QualityGateService to cover remaining edge cases.
 /// </summary>
+[Collection(PluginInstanceCollection.Name)]
 public class QualityGateServiceAdditionalTests : IDisposable
 {
     private readonly Plugin _plugin;

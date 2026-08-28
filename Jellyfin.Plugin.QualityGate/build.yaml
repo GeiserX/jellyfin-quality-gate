@@ -1,19 +1,27 @@
 name: "QualityGate"
 guid: "9cab70ca-0af3-4d3a-adab-6a0df2496a33"
-version: "3.4.0.0"
+version: "3.5.0.0"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "GeiserX"
-overview: "Restrict users to specific media versions based on filename regex patterns."
-description: "Quality Gate allows Jellyfin administrators to restrict users to specific media versions via filename regex patterns. Designed for Jellyfin multi-version naming (e.g. 'Movie (2021) - 1080p.mkv'). Useful for bandwidth management, tiered access, and device optimization."
+overview: "Cap the resolution a user may be served, measured against the media's actual height."
+description: "Quality Gate lets Jellyfin administrators cap the resolution a user may be served. The cap is measured against the media's actual height, read from its video stream, so it holds whatever the file is called. Media above the cap is served as a capped transcode, or as a lower-resolution version of the same item where one exists, and requests for the original file are refused. Useful for bandwidth management and tiered access."
 category: "General"
 imageUrl: ""
 artifacts:
   - Jellyfin.Plugin.QualityGate.dll
 changelog: |
+  ## v3.5.0.0
+  - Resolution cap enforced on the media's actual height (video MediaStream), not on filenames
+  - New per-policy "Maximum Resolution" setting; 0 (No limit) is the default, so existing configs are unchanged
+  - Negotiation: PlaybackInfo now offers a lower-resolution version of the item when one exists, and otherwise a transcode capped at the policy height
+  - Direct delivery: /Videos/{id}/stream, stream.{container}, master/main/live.m3u8, hls1 segments, /Audio/{id}/stream and /Items/{id}/File and /Download return 403 for an over-cap item
+  - Closes the legacy `params` bypass, whose positional fields overrode the static flag and max height inside the action
+  - Media with no probed height is allowed and logged as a warning; negotiation still transcodes it at the cap
   ## v3.4.0.0
   - Intro-only build for Jellyfin 12: targets ABI 12.0.0.0 on net10.0 (12.0.0-rc5 packages)
-  - MediaSourceResultFilter and the QualityGate API controller are no longer registered/shipped; per-policy intro videos and the admin page remain
+  - The QualityGate API controller was deleted; MediaSourceResultFilter is no longer registered or active, so filename patterns restrict nothing (the type stays in the assembly, inert)
+  - Per-policy intro videos and the admin page remain
   ## v3.2.0.0
   - BREAKING: removed path-prefix support entirely (filename regex patterns only)
   - Fail-closed default policy: broken/disabled DefaultPolicyId now denies instead of granting full access
