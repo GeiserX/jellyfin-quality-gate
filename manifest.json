@@ -9,6 +9,30 @@
     "imageUrl": "",
     "versions": [
       {
+        "version": "3.5.0.0",
+        "changelog": "See https://github.com/GeiserX/quality-gate/releases",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/GeiserX/quality-gate/releases/download/v3.5.0.0/quality-gate_3.5.0.0.zip",
+        "checksum": "679dd2d13759bc0d8990c695bde0e69c",
+        "timestamp": "2026-08-28T16:31:15Z"
+      },
+      {
+        "version": "3.4.0.0",
+        "changelog": "See https://github.com/GeiserX/quality-gate/releases",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/GeiserX/quality-gate/releases/download/v3.4.0.0/quality-gate_3.4.0.0.zip",
+        "checksum": "ea1b0024861e433958e47a5af3dad6d5",
+        "timestamp": "2026-08-26T12:27:19Z"
+      },
+      {
+        "version": "3.3.6.0",
+        "changelog": "See https://github.com/GeiserX/quality-gate/releases",
+        "targetAbi": "10.11.0.0",
+        "sourceUrl": "https://github.com/GeiserX/quality-gate/releases/download/v3.3.6.0/quality-gate_3.3.6.0.zip",
+        "checksum": "88fa2527c7f57874a05c897633e57c5a",
+        "timestamp": "2026-05-23T15:26:46Z"
+      },
+      {
         "version": "3.2.0.0",
         "changelog": "Fail-closed default policy, filename-only regex matching, dangling symlink protection.",
         "targetAbi": "10.11.0.0",
