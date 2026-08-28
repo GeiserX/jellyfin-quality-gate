@@ -442,6 +442,18 @@ function renderPolicies(view) {
             '<div class="qg-policy-section">' +
                 '<h3 class="qg-policy-section-title">Playback Behavior</h3>' +
                 '<div class="qg-policy-footer">' +
+                    '<div class="selectContainer qg-policy-maxheight-field">' +
+                        '<label class="selectLabel" for="policy-maxheight-' + index + '">Maximum Resolution</label>' +
+                        '<select is="emby-select" id="policy-maxheight-' + index + '" class="emby-select policy-max-height">' +
+                            '<option value="0"' + (!policy.MaxHeight ? ' selected' : '') + '>No limit</option>' +
+                            '<option value="480"' + (policy.MaxHeight === 480 ? ' selected' : '') + '>480p</option>' +
+                            '<option value="720"' + (policy.MaxHeight === 720 ? ' selected' : '') + '>720p</option>' +
+                            '<option value="1080"' + (policy.MaxHeight === 1080 ? ' selected' : '') + '>1080p</option>' +
+                            '<option value="1440"' + (policy.MaxHeight === 1440 ? ' selected' : '') + '>1440p</option>' +
+                            '<option value="2160"' + (policy.MaxHeight === 2160 ? ' selected' : '') + '>4K</option>' +
+                        '</select>' +
+                        '<div class="fieldDescription">Measured against the media\'s actual height, not its filename. Anything taller is served as a transcode capped here, and a request for the original is refused. "No limit" leaves playback untouched.</div>' +
+                    '</div>' +
                     '<div class="inputContainer qg-policy-intro-field">' +
                         '<label class="inputLabel inputLabelUnfocused" for="' + introId + '">Custom Intro Video</label>' +
                         '<input type="text" id="' + introId + '" class="emby-input policy-intro" ' +
@@ -779,6 +791,7 @@ function collectFromDOM(view) {
             }
         ).filter(Boolean);
         config.Policies[index].IntroVideoPath = card.querySelector('.policy-intro').value.trim();
+        config.Policies[index].MaxHeight = parseInt(card.querySelector('.policy-max-height').value, 10) || 0;
         var fallbackVal = card.querySelector('.policy-fallback-mode').value;
         config.Policies[index].FallbackTranscode = fallbackVal !== 'off';
         config.Policies[index].FallbackMaxHeight = fallbackVal !== 'off' ? parseInt(fallbackVal, 10) : 0;
@@ -818,6 +831,7 @@ function addPolicy(view) {
         AllowedFilenamePatterns: [],
         BlockedFilenamePatterns: [],
         Enabled: true,
+        MaxHeight: 0,
         FallbackTranscode: false,
         FallbackMaxHeight: 0,
         FallbackMaxBitrateKbps: 0,
@@ -930,6 +944,7 @@ function loadConfig(view) {
         config.Policies.forEach(function (policy) {
             policy.AllowedFilenamePatterns = policy.AllowedFilenamePatterns || [];
             policy.BlockedFilenamePatterns = policy.BlockedFilenamePatterns || [];
+            policy.MaxHeight = policy.MaxHeight || 0;
             policy.FallbackTranscode = policy.FallbackTranscode || false;
             policy.FallbackMaxHeight = policy.FallbackMaxHeight || 0;
             policy.FallbackMaxBitrateKbps = policy.FallbackMaxBitrateKbps || 0;

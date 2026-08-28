@@ -1,0 +1,798 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json.Nodes;
+using System.Threading.Tasks;
+using Jellyfin.Plugin.QualityGate.Configuration;
+using Jellyfin.Plugin.QualityGate.Filters;
+using MediaBrowser.Common.Configuration;
+using MediaBrowser.Controller.Library;
+using MediaBrowser.Model.Dto;
+using MediaBrowser.Model.Entities;
+using MediaBrowser.Model.MediaInfo;
+using MediaBrowser.Model.Serialization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Abstractions;
+using Microsoft.AspNetCore.Mvc.Filters;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
+using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Logging;
+using Moq;
+
+namespace Jellyfin.Plugin.QualityGate.Tests;
+
+public class ResolutionCapFilterTests : IDisposable
+{
+    private const int Cap = 720;
+
+    private static readonly Guid ItemId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+
+    private readonly Plugin _plugin;
+    private readonly string _tempDir;
+    private readonly Mock<ILogger<ResolutionCapFilter>> _loggerMock;
+    private readonly Mock<IMediaSourceManager> _mediaSourceManagerMock;
+    private readonly ResolutionCapFilter _filter;
+
+    public ResolutionCapFilterTests()
+    {
+        _tempDir = Path.Combine(Path.GetTempPath(), "qg-cap-" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(_tempDir);
+
+        var appPaths = new Mock<IApplicationPaths>();
+        appPaths.SetReturnsDefault<string>(_tempDir);
+        var xmlSerializer = new Mock<IXmlSerializer>();
+        xmlSerializer.Setup(x => x.DeserializeFromFile(It.IsAny<Type>(), It.IsAny<string>()))
+            .Returns(new PluginConfiguration());
+        _plugin = new Plugin(appPaths.Object, xmlSerializer.Object);
+
+        _loggerMock = new Mock<ILogger<ResolutionCapFilter>>();
+        _mediaSourceManagerMock = new Mock<IMediaSourceManager>();
+        _filter = new ResolutionCapFilter(_loggerMock.Object, _mediaSourceManagerMock.Object);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_tempDir))
+        {
+            Directory.Delete(_tempDir, true);
+        }
+
+        GC.SuppressFinalize(this);
+    }
+
+    // --- helpers ---
+
+    private void SetConfig(PluginConfiguration config)
+    {
+        _plugin.Configuration.Policies = config.Policies;
+        _plugin.Configuration.UserPolicies = config.UserPolicies;
+        _plugin.Configuration.DefaultPolicyId = config.DefaultPolicyId;
+        _plugin.Configuration.DefaultIntroVideoPath = config.DefaultIntroVideoPath;
+    }
+
+    /// <summary>Applies a policy capped at 720p to every user without an override.</summary>
+    private void UseCappedPolicy(int maxHeight = Cap)
+    {
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = maxHeight },
+            },
+            DefaultPolicyId = "p1",
+        });
+    }
+
+    /// <summary>Applies a policy with no height cap — the shape every existing config has.</summary>
+    private void UseUncappedPolicy()
+    {
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "No cap", Enabled = true, MaxHeight = 0 },
+            },
+            DefaultPolicyId = "p1",
+        });
+    }
+
+    /// <summary>No policy at all — a donor.</summary>
+    private void UseFullAccess()
+    {
+        SetConfig(new PluginConfiguration());
+    }
+
+    private void SetItemHeight(int? height)
+    {
+        var streams = new List<MediaStream>
+        {
+            new MediaStream { Type = MediaStreamType.Audio },
+        };
+
+        if (height.HasValue)
+        {
+            streams.Add(new MediaStream { Type = MediaStreamType.Video, Height = height.Value });
+        }
+        else
+        {
+            // Probed as video, but with no resolution recorded — the live library's null-height case.
+            streams.Add(new MediaStream { Type = MediaStreamType.Video, Height = null });
+        }
+
+        _mediaSourceManagerMock.Setup(m => m.GetMediaStreams(It.IsAny<Guid>())).Returns(streams);
+    }
+
+    private static HttpContext CreateHttpContext(
+        string path,
+        string method = "GET",
+        Guid? userId = null,
+        Dictionary<string, string>? queryParams = null,
+        bool useJellyfinClaim = true)
+    {
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Path = path;
+        httpContext.Request.Method = method;
+
+        if (userId.HasValue)
+        {
+            var claim = useJellyfinClaim
+                ? new Claim("Jellyfin-UserId", userId.Value.ToString("N"))
+                : new Claim(ClaimTypes.NameIdentifier, userId.Value.ToString());
+            httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(new[] { claim }, "test"));
+        }
+
+        if (queryParams != null)
+        {
+            httpContext.Request.Query = new QueryCollection(queryParams.ToDictionary(
+                kvp => kvp.Key,
+                kvp => new Microsoft.Extensions.Primitives.StringValues(kvp.Value)));
+        }
+
+        return httpContext;
+    }
+
+    private static ResourceExecutingContext CreateResourceContext(HttpContext httpContext)
+    {
+        var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
+        return new ResourceExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new List<IValueProviderFactory>());
+    }
+
+    private static ResultExecutingContext CreateResultContext(HttpContext httpContext, object? resultValue)
+    {
+        var actionContext = new ActionContext(httpContext, new RouteData(), new ActionDescriptor());
+        return new ResultExecutingContext(
+            actionContext,
+            new List<IFilterMetadata>(),
+            new ObjectResult(resultValue),
+            new object());
+    }
+
+    /// <summary>Runs the resource phase and reports whether the request was let through.</summary>
+    private async Task<(bool Allowed, ResourceExecutingContext Context)> RunResourceAsync(HttpContext httpContext)
+    {
+        var context = CreateResourceContext(httpContext);
+        var reachedAction = false;
+
+        Task<ResourceExecutedContext> Next()
+        {
+            reachedAction = true;
+            return Task.FromResult(new ResourceExecutedContext(context, new List<IFilterMetadata>()));
+        }
+
+        await _filter.OnResourceExecutionAsync(context, Next);
+        return (reachedAction, context);
+    }
+
+    private async Task RunResultAsync(HttpContext httpContext, object? resultValue)
+    {
+        var context = CreateResultContext(httpContext, resultValue);
+
+        Task<ResultExecutedContext> Next()
+        {
+            return Task.FromResult(new ResultExecutedContext(
+                context, new List<IFilterMetadata>(), new ObjectResult(null), new object()));
+        }
+
+        await _filter.OnResultExecutionAsync(context, Next);
+    }
+
+    private static void AssertRefused(bool allowed, ResourceExecutingContext context)
+    {
+        Assert.False(allowed);
+        var result = Assert.IsType<StatusCodeResult>(context.Result);
+        Assert.Equal(StatusCodes.Status403Forbidden, result.StatusCode);
+    }
+
+    private static void AssertAllowed(bool allowed, ResourceExecutingContext context)
+    {
+        Assert.True(allowed);
+        Assert.Null(context.Result);
+    }
+
+    private void AssertLoggedAtLeastOnce(LogLevel level)
+    {
+        _loggerMock.Verify(
+            x => x.Log(
+                level,
+                It.IsAny<EventId>(),
+                It.IsAny<It.IsAnyType>(),
+                It.IsAny<Exception>(),
+                (Func<It.IsAnyType, Exception?, string>)It.IsAny<object>()),
+            Times.AtLeastOnce);
+    }
+
+    private static string StreamPath(Guid itemId = default)
+    {
+        return $"/Videos/{(itemId == default ? ItemId : itemId)}/stream";
+    }
+
+    // --- the four required cases ---
+
+    [Fact]
+    public async Task RestrictedUser_OverCapItem_StaticRequest_IsRefused()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+        AssertLoggedAtLeastOnce(LogLevel.Warning);
+    }
+
+    [Fact]
+    public async Task RestrictedUser_UnderCapItem_StaticRequest_IsAllowed()
+    {
+        UseCappedPolicy();
+        SetItemHeight(720);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
+    public async Task UnrestrictedUser_OverCapItem_StaticRequest_IsAllowed()
+    {
+        UseFullAccess();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(It.IsAny<Guid>()), Times.Never);
+    }
+
+    /// <summary>
+    /// Chosen behaviour for an item whose height is unknown: ALLOW, and log a warning naming
+    /// the item. A null height means the server has not probed the file, which is
+    /// indistinguishable from a plugin defect; refusing would take those items away from every
+    /// restricted user at once. Negotiation still caps them, because the injected Height
+    /// condition is marked required and an unknown value fails a required condition.
+    /// </summary>
+    [Fact]
+    public async Task RestrictedUser_NullHeightItem_IsAllowedAndWarns()
+    {
+        UseCappedPolicy();
+        SetItemHeight(null);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+        AssertLoggedAtLeastOnce(LogLevel.Warning);
+    }
+
+    // --- transcode requests ---
+
+    [Fact]
+    public async Task RestrictedUser_OverCapItem_TranscodeHeldToCap_IsAllowed()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["maxHeight"] = "720" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
+    public async Task RestrictedUser_OverCapItem_TranscodeWithNoCap_IsRefused()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(StreamPath(), userId: Guid.NewGuid());
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task RestrictedUser_OverCapItem_TranscodeAboveCap_IsRefused()
+    {
+        UseCappedPolicy();
+        SetItemHeight(2160);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["maxHeight"] = "1080" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    // --- the params blob, which Jellyfin applies AFTER model binding ---
+
+    [Fact]
+    public async Task ParamsBlob_TurningOnStatic_IsRefused()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        // Index 3 of params sets Static inside the action, regardless of ?static.
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string>
+            {
+                ["maxHeight"] = "720",
+                ["params"] = ";;;true",
+            });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task ParamsBlob_RaisingMaxHeight_IsRefused()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        // Index 13 of params overwrites the bound MaxHeight inside the action.
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string>
+            {
+                ["maxHeight"] = "720",
+                ["params"] = ";;;;;;;;;;;;;1080",
+            });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task ParamsBlob_LoweringMaxHeightToCap_IsAllowed()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["params"] = ";;;;;;;;;;;;;720" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    // --- the other delivery routes ---
+
+    [Theory]
+    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/master.m3u8")]
+    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/main.m3u8")]
+    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/live.m3u8")]
+    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/hls1/main/0.mp4")]
+    [InlineData("/Videos/11111111-1111-1111-1111-111111111111/stream.mkv")]
+    [InlineData("/Audio/11111111-1111-1111-1111-111111111111/stream")]
+    [InlineData("/Items/11111111-1111-1111-1111-111111111111/File")]
+    [InlineData("/Items/11111111-1111-1111-1111-111111111111/Download")]
+    public async Task OverCapItem_IsRefusedOnEveryDeliveryRoute(string path)
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            path,
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task OriginalFileRoute_IgnoresTranscodeParameters()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        // /Items/{id}/File always returns the original, so maxHeight cannot make it acceptable.
+        var httpContext = CreateHttpContext(
+            $"/Items/{ItemId}/File",
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["maxHeight"] = "720" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task BaseUrlPrefix_IsStillMatched()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            $"/jellyfin/Videos/{ItemId}/stream",
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task MediaSourceId_SelectsTheVersionBeingFetched()
+    {
+        UseCappedPolicy();
+        var versionId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string>
+            {
+                ["static"] = "true",
+                ["mediaSourceId"] = versionId.ToString(),
+            });
+
+        await RunResourceAsync(httpContext);
+
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(versionId), Times.Once);
+    }
+
+    // --- requests the filter must not touch ---
+
+    [Fact]
+    public async Task UnrelatedPath_IsNotEvaluated()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext("/System/Info", userId: Guid.NewGuid());
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task PolicyWithoutHeightCap_ChangesNothing()
+    {
+        UseUncappedPolicy();
+        SetItemHeight(2160);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+        _mediaSourceManagerMock.Verify(m => m.GetMediaStreams(It.IsAny<Guid>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AnonymousRequest_IsNotEvaluated()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(StreamPath());
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
+    public async Task NameIdentifierClaim_StillResolvesTheUser()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" },
+            useJellyfinClaim: false);
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    // --- fail open ---
+
+    [Fact]
+    public async Task WhenLookupThrows_RequestIsAllowedAndErrorLogged()
+    {
+        UseCappedPolicy();
+        _mediaSourceManagerMock
+            .Setup(m => m.GetMediaStreams(It.IsAny<Guid>()))
+            .Throws(new InvalidOperationException("boom"));
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+        AssertLoggedAtLeastOnce(LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task UnresolvableItemId_IsAllowed()
+    {
+        UseCappedPolicy();
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            "/Videos/not-a-guid/stream",
+            userId: Guid.NewGuid(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    // --- negotiation: the PlaybackInfo response ---
+
+    private static PlaybackInfoResponse ResponseWithHeights(params int?[] heights)
+    {
+        return new PlaybackInfoResponse
+        {
+            MediaSources = heights.Select((h, i) => new MediaSourceInfo
+            {
+                Id = i.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                Path = $"/media/source-{i}.mkv",
+                SupportsDirectPlay = true,
+                SupportsDirectStream = true,
+                MediaStreams = h.HasValue
+                    ? new[] { new MediaStream { Type = MediaStreamType.Video, Height = h.Value } }
+                    : Array.Empty<MediaStream>(),
+            }).ToArray(),
+        };
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_DropsOverCapSource_WhenAWithinCapSiblingExists()
+    {
+        UseCappedPolicy();
+        var response = ResponseWithHeights(1080, 720);
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
+        await RunResultAsync(httpContext, response);
+
+        var kept = Assert.Single(response.MediaSources);
+        Assert.Equal(720, kept.MediaStreams[0].Height);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_WhenEverySourceIsOverCap_ForcesTranscode()
+    {
+        UseCappedPolicy();
+        var response = ResponseWithHeights(1080, 2160);
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
+        await RunResultAsync(httpContext, response);
+
+        Assert.Equal(2, response.MediaSources.Count);
+        Assert.All(response.MediaSources, s =>
+        {
+            Assert.False(s.SupportsDirectPlay);
+            Assert.False(s.SupportsDirectStream);
+        });
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_WhenEverySourceIsWithinCap_IsUntouched()
+    {
+        UseCappedPolicy();
+        var response = ResponseWithHeights(720, 480);
+        var original = response.MediaSources;
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
+        await RunResultAsync(httpContext, response);
+
+        Assert.Same(original, response.MediaSources);
+        Assert.All(response.MediaSources, s => Assert.True(s.SupportsDirectPlay));
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_UnrestrictedUser_IsUntouched()
+    {
+        UseFullAccess();
+        var response = ResponseWithHeights(1080, 2160);
+        var original = response.MediaSources;
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
+        await RunResultAsync(httpContext, response);
+
+        Assert.Same(original, response.MediaSources);
+        Assert.All(response.MediaSources, s => Assert.True(s.SupportsDirectPlay));
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_NullHeightSource_IsNotDropped()
+    {
+        UseCappedPolicy();
+        var response = ResponseWithHeights(null, 1080);
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
+        await RunResultAsync(httpContext, response);
+
+        var kept = Assert.Single(response.MediaSources);
+        Assert.Empty(kept.MediaStreams);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_NonPlaybackResult_IsIgnored()
+    {
+        UseCappedPolicy();
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
+        await RunResultAsync(httpContext, "not a playback response");
+
+        // Nothing to assert beyond "did not throw"; the filter must pass unknown shapes through.
+        Assert.True(true);
+    }
+
+    // --- negotiation: the device profile in the request body ---
+
+    private static HttpContext CreatePlaybackInfoPost(Guid userId, string body)
+    {
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", userId);
+        var bytes = Encoding.UTF8.GetBytes(body);
+        httpContext.Request.Body = new MemoryStream(bytes);
+        httpContext.Request.ContentLength = bytes.Length;
+        httpContext.Request.ContentType = "application/json";
+        return httpContext;
+    }
+
+    private static string ReadBody(HttpContext httpContext)
+    {
+        httpContext.Request.Body.Position = 0;
+        using var reader = new StreamReader(httpContext.Request.Body, Encoding.UTF8, leaveOpen: true);
+        return reader.ReadToEnd();
+    }
+
+    [Fact]
+    public async Task PlaybackInfoPost_AddsRequiredHeightConditionToDeviceProfile()
+    {
+        UseCappedPolicy();
+        var httpContext = CreatePlaybackInfoPost(
+            Guid.NewGuid(),
+            "{\"DeviceProfile\":{\"DirectPlayProfiles\":[],\"TranscodingProfiles\":[]}}");
+
+        await RunResourceAsync(httpContext);
+
+        var root = JsonNode.Parse(ReadBody(httpContext))!.AsObject();
+        var codecProfiles = root["DeviceProfile"]!["CodecProfiles"]!.AsArray();
+        var condition = codecProfiles[0]!["Conditions"]!.AsArray()[0]!.AsObject();
+
+        Assert.Equal("Video", codecProfiles[0]!["Type"]!.GetValue<string>());
+        Assert.Equal("LessThanEqual", condition["Condition"]!.GetValue<string>());
+        Assert.Equal("Height", condition["Property"]!.GetValue<string>());
+        Assert.Equal("720", condition["Value"]!.GetValue<string>());
+        Assert.True(condition["IsRequired"]!.GetValue<bool>());
+
+        // Width is deliberately left alone: a 2.39:1 film at 720p is wider than 16:9.
+        Assert.DoesNotContain("\"Property\":\"Width\"", ReadBody(httpContext), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task PlaybackInfoPost_KeepsExistingCodecProfiles()
+    {
+        UseCappedPolicy();
+        var httpContext = CreatePlaybackInfoPost(
+            Guid.NewGuid(),
+            "{\"DeviceProfile\":{\"CodecProfiles\":[{\"Type\":\"VideoAudio\"}]}}");
+
+        await RunResourceAsync(httpContext);
+
+        var codecProfiles = JsonNode.Parse(ReadBody(httpContext))!
+            .AsObject()["DeviceProfile"]!["CodecProfiles"]!.AsArray();
+
+        Assert.Equal(2, codecProfiles.Count);
+        Assert.Equal("VideoAudio", codecProfiles[0]!["Type"]!.GetValue<string>());
+        Assert.Equal("Video", codecProfiles[1]!["Type"]!.GetValue<string>());
+    }
+
+    [Fact]
+    public async Task PlaybackInfoPost_WithoutDeviceProfile_LeavesBodyAlone()
+    {
+        UseCappedPolicy();
+        const string Body = "{\"MaxStreamingBitrate\":20000000}";
+        var httpContext = CreatePlaybackInfoPost(Guid.NewGuid(), Body);
+
+        await RunResourceAsync(httpContext);
+
+        Assert.Equal(Body, ReadBody(httpContext));
+    }
+
+    [Fact]
+    public async Task PlaybackInfoPost_UnrestrictedUser_LeavesBodyAlone()
+    {
+        UseFullAccess();
+        const string Body = "{\"DeviceProfile\":{\"DirectPlayProfiles\":[]}}";
+        var httpContext = CreatePlaybackInfoPost(Guid.NewGuid(), Body);
+
+        await RunResourceAsync(httpContext);
+
+        Assert.Equal(Body, ReadBody(httpContext));
+    }
+
+    [Fact]
+    public async Task PlaybackInfoGet_LeavesBodyAlone()
+    {
+        UseCappedPolicy();
+        const string Body = "{\"DeviceProfile\":{\"DirectPlayProfiles\":[]}}";
+        var httpContext = CreatePlaybackInfoPost(Guid.NewGuid(), Body);
+        httpContext.Request.Method = "GET";
+
+        await RunResourceAsync(httpContext);
+
+        Assert.Equal(Body, ReadBody(httpContext));
+    }
+}

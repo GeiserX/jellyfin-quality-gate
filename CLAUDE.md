@@ -19,7 +19,7 @@
 
 ### Languages
 
-- C# (.NET 9.0)
+- C# (.NET 10.0, Jellyfin 12 ABI)
 - HTML / JavaScript (config page -- vanilla JS, no framework)
 
 ### Frameworks & Libraries
@@ -36,10 +36,9 @@ Plugin.cs                            Entry point, IHasWebPages (config UI)
 │   ├── PluginConfiguration.cs       Policies, user assignments, default policy
 │   ├── configPage.html              Admin UI -- policy editor, user overrides
 │   └── configPage.js                Admin UI logic
-├── Api/
-│   └── QualityGateController.cs     Custom REST API (binds to authenticated caller only)
 ├── Filters/
-│   └── MediaSourceResultFilter.cs   IAsyncResultFilter -- core enforcement layer
+│   ├── ResolutionCapFilter.cs       Resource + result filter -- the enforcement layer
+│   └── MediaSourceResultFilter.cs   Legacy filename filter -- present but NOT registered
 ├── Providers/
 │   └── QualityGateIntroProvider.cs  Policy-based intro video selection
 ├── Services/
@@ -49,7 +48,24 @@ Plugin.cs                            Entry point, IHasWebPages (config UI)
 
 ### Enforcement Model
 
-The plugin uses an **IAsyncResultFilter** registered via `PostConfigure<MvcOptions>`. This intercepts Jellyfin API responses _before_ serialization, removing blocked MediaSources from:
+**The resolution cap (v3.5.0.0+) is the enforcing rule.** `ResolutionCapFilter` is an
+`IAsyncResourceFilter` + `IAsyncResultFilter` registered via `PostConfigure<MvcOptions>`. It
+compares `QualityPolicy.MaxHeight` against the media's actual height from its video
+`MediaStream`, never against the filename. `MaxHeight = 0` (the default) disables it entirely,
+so an existing config and every unrestricted user are untouched.
+
+It covers both ways video leaves the server:
+
+- **Negotiation** (`POST /Items/{id}/PlaybackInfo`): phase 1 injects a required
+  `Height <= cap` video `CodecProfile` condition into the DeviceProfile in the request body
+  before model binding; phase 2 drops over-cap sources from `PlaybackInfoResponse` when a
+  within-cap sibling exists, and otherwise marks every source transcode-only.
+- **Direct delivery**: 403 on `/Videos/{id}/stream`, `stream.{container}`,
+  `master|main|live.m3u8`, `hls1/…`, `/Audio/{id}/stream` and `/Items/{id}/File|Download`
+  when the item is over the cap and the request wants the bytes as-is or an uncapped transcode.
+
+The older **MediaSourceResultFilter** (filename patterns) stays in the assembly, **unregistered**.
+It uses an `IAsyncResultFilter` registered via `PostConfigure<MvcOptions>`. This intercepts Jellyfin API responses _before_ serialization, removing blocked MediaSources from:
 
 - `PlaybackInfoResponse` (playback endpoint)
 - `BaseItemDto` (item detail / user item endpoints)
@@ -90,18 +106,17 @@ When all sources are blocked and fallback transcode is disabled, the filter retu
 
 ### API Endpoints
 
-| Method | Path | Auth | Returns |
-|--------|------|------|---------|
-| `GET` | `/QualityGate/MediaSources/{itemId}` | Authenticated user (JWT) | Filtered media sources for caller |
-| `GET` | `/QualityGate/DefaultSource/{itemId}` | Authenticated user (JWT) | First allowed source for caller |
+The plugin ships **no** API controller. `QualityGateController` was deleted in v3.4.0.0 — its
+only job was MediaSource filtering, the admin page never called it, and controllers mount by
+assembly scanning so leaving it in the tree would remount it. A stale copy still sits untracked
+in some working copies and is excluded from compilation in the csproj.
 
-The custom API controller binds exclusively to the authenticated caller's JWT claims. It does NOT accept caller-supplied `userId` parameters (IDOR prevention).
+### UserId Resolution
 
-### UserId Resolution (Result Filter vs Custom API)
-
-The **custom API controller** (`QualityGateController`) uses ONLY JWT claims to identify the caller. This is the secure, IDOR-free path.
-
-The **result filter** (`MediaSourceResultFilter`) also needs userId fallbacks (query params, route values, URL path extraction) because it intercepts Jellyfin's own endpoints where Jellyfin itself embeds userId in the request. Jellyfin's `[Authorize]` attribute validates the caller before the filter runs.
+`ResolutionCapFilter.GetUserId` reads `Jellyfin-UserId` first (Jellyfin 12's own claim, a Guid
+in "N" format) and falls back to `ClaimTypes.NameIdentifier` for 10.x. It never accepts a
+caller-supplied `userId` from the query or route: on the routes it gates, the caller does not
+get to say who they are. Jellyfin's `[Authorize]` validates the caller before the filter runs.
 
 ## Configuration
 
@@ -112,6 +127,7 @@ Editable via **Dashboard -> Plugins -> Quality Gate**.
 | Field | Description |
 |-------|-------------|
 | **Policy Name** | Descriptive name (e.g., "720p Only") |
+| **Maximum Resolution** | Height cap in pixels, matched against the media's video stream. Maps to `MaxHeight` (int). 0 = no cap, and no enforcement at all. **This is the field that enforces.** |
 | **Allowed Filename Patterns** | Regex patterns matched against filenames. Files must match at least one. |
 | **Blocked Filename Patterns** | Regex patterns matched against filenames. Matching files are always blocked. |
 | **Custom Intro Video** | Optional path to intro video for users under this policy. |
@@ -133,7 +149,7 @@ Editable via **Dashboard -> Plugins -> Quality Gate**.
 ```bash
 cd Jellyfin.Plugin.QualityGate
 dotnet build -c Release
-# Output: bin/Release/net9.0/Jellyfin.Plugin.QualityGate.dll
+# Output: bin/Release/net10.0/Jellyfin.Plugin.QualityGate.dll
 ```
 
 ### Deploy
@@ -200,6 +216,15 @@ Version in `.csproj` (`<AssemblyVersion>` + `<FileVersion>` + `<Version>`) must 
 
 Things discovered during development that save time and prevent mistakes:
 
+- **Jellyfin 12 issues no `ClaimTypes.NameIdentifier`**: `CustomAuthenticationHandler` emits `Jellyfin-UserId` holding a Guid in **"N" format** (no dashes), plus `ClaimTypes.Name` and `ClaimTypes.Role`. Any user resolution must read `Jellyfin-UserId` first. `Guid.TryParse` accepts the "N" form.
+- **A `Height` CodecProfile condition is the lever for a resolution cap**: `StreamBuilder` maps a failed Height condition to `TranscodeReason.VideoResolutionNotSupported` (rules out direct play) and a `LessThanEqual` Height condition to `item.MaxHeight` (caps the transcode). One condition does both jobs.
+- **`IsRequired` decides what happens to unknown values**: `ConditionProcessor.IsConditionSatisfied` returns `!condition.IsRequired` when the value is null. An unprobed item therefore *satisfies* a non-required cap and direct plays at full size. Mark the cap condition required.
+- **Never derive a Width condition from a Height cap**: a 2.39:1 film at 720p is 1720px wide, so a 16:9-derived width cap would force a transcode of media already within the cap. Cap height only.
+- **The `params` query blob overrides bound values inside the action**: `StreamingHelpers.ParseParams` splits `params` on `;` and assigns **by position** — index 2 `MediaSourceId`, index 3 `Static`, index 13 `MaxHeight`. It runs in `GetStreamingState`, i.e. after every MVC filter. A gate reading only the named query parameters is walked past by `?params=;;;true`.
+- **`/Audio/{itemId}/stream` serves video**: `AudioController` never checks the item type, and `AudioHelper` returns `GetStaticFileResult(state.MediaPath, …)`. A Videos-only gate is bypassable through the Audio routes.
+- **`/Items/{id}/File` returns the original, symlinks resolved**: only a plain `[Authorize]`, no resolution concept. `/Items/{id}/Download` is the same behind the `Download` policy.
+- **The legacy HLS segment route cannot be gated**: `HlsSegmentController`'s `{itemId}` is declared but unused (`CA1801` suppression); the file is found by `segmentId`, an MD5 of media path + user agent + device id + play session id. There is no way to map a request back to an item without tracking transcode starts.
+- **Jellyfin 12 ships no MVC filters of its own** and no `IFilterProvider`/`IApplicationModelConvention`, so a plugin's global filter runs unopposed on every controller, streaming routes included. Response compression sits outside routing and does not affect filter short-circuiting.
 - **PostConfigure, not Configure**: Plugin filter registration MUST use `PostConfigure<MvcOptions>` in `IPluginServiceRegistrator`. Plain `Configure` runs too early and the filter gets overwritten by Jellyfin's own MVC setup.
 - **Middleware does NOT work**: Jellyfin enables response compression. HTTP middleware sees gzipped bytes, not JSON. The `IAsyncResultFilter` approach operates on C# objects before serialization, completely bypassing compression.
 - **Jellyfin resolves symlinks in MediaSource paths**: When media files are symlinks, Jellyfin stores the **resolved target path** in `MediaSourceInfo.Path`, not the symlink path. The plugin checks both the original and symlink-resolved filenames against patterns.

@@ -1,12 +1,12 @@
 {
   "category": "General",
-  "changelog": "v3.4.0.0: Intro-only build for Jellyfin 12 (net10.0, ABI 12.0.0.0). Media source filtering is not registered; per-policy intro videos and the admin page remain.",
-  "description": "Quality Gate allows Jellyfin administrators to restrict users to specific media versions via filename regex patterns. Designed for Jellyfin multi-version naming (e.g. 'Movie (2021) - 1080p.mkv'). Useful for bandwidth management, tiered access, and device optimization.",
+  "changelog": "v3.5.0.0: Resolution cap enforced on the media's actual height instead of its filename. New per-policy Maximum Resolution setting, defaulting to No limit. PlaybackInfo offers a lower-resolution version where one exists and otherwise a capped transcode; the stream, HLS and original-file routes refuse an over-cap item.",
+  "description": "Quality Gate lets Jellyfin administrators cap the resolution a user may be served. The cap is measured against the media's actual height, read from its video stream, so it holds whatever the file is called. Media above the cap is served as a capped transcode, or as a lower-resolution version of the same item where one exists, and requests for the original file are refused. Useful for bandwidth management and tiered access.",
   "guid": "9cab70ca-0af3-4d3a-adab-6a0df2496a33",
   "name": "QualityGate",
-  "overview": "Restrict users to specific media versions based on filename regex patterns.",
+  "overview": "Cap the resolution a user may be served, measured against the media's actual height.",
   "owner": "GeiserX",
   "targetAbi": "12.0.0.0",
-  "timestamp": "2026-08-26T12:00:00Z",
-  "version": "3.4.0.0"
+  "timestamp": "2026-08-28T12:00:00Z",
+  "version": "3.5.0.0"
 }

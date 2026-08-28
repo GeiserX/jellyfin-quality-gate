@@ -78,6 +78,16 @@ public class QualityPolicy
     public List<string> BlockedFilenamePatterns { get; set; } = new();
 
     /// <summary>
+    /// Gets or sets the maximum video height, in pixels, that a user under this policy
+    /// may be served (e.g. 720 for a 720p tier).
+    /// The cap is evaluated against the media's actual height, read from its video
+    /// <see cref="MediaBrowser.Model.Entities.MediaStream"/>, not against its filename.
+    /// Zero (the default) disables height enforcement, so an existing configuration
+    /// keeps its current behaviour until a height is chosen.
+    /// </summary>
+    public int MaxHeight { get; set; }
+
+    /// <summary>
     /// Gets or sets a value indicating whether this policy is enabled.
     /// </summary>
     public bool Enabled { get; set; } = true;

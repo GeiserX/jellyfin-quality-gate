@@ -15,13 +15,17 @@
 
 <p align="center"><strong>Intelligent media access control for Jellyfin</strong></p>
 
-> **v3.4.0.0 is an intro-only build for Jellyfin 12.** Only the per-policy intro provider is registered; media source filtering (and the `/QualityGate` API) is not active until it has been re-validated against the Jellyfin 12 ABI. Policies and user assignments in the admin page keep working and drive intro selection. For version filtering on Jellyfin 12, use separate libraries per quality tier with Jellyfin's built-in Library Access settings.
+> **v3.5.0.0 enforces a resolution cap on Jellyfin 12.** The cap is measured against the media's actual height, read from the item's video stream, so it holds whatever the file is called. Set **Maximum Resolution** on a policy to switch it on; the default, **No limit**, leaves playback exactly as it is, so upgrading changes nothing until you choose a height.
+>
+> Filename regex patterns still exist in the config and still describe the older `MediaSourceResultFilter`, which stays unregistered on Jellyfin 12. They do **not** drive the resolution cap. A pattern like `- 720p` matches nothing when the served path keeps the original name — which is exactly why the cap is measured, not read off the filename.
 
 ---
 
 ## Features
 
-- **Filename Regex Patterns** -- Match against filenames with regex for [Jellyfin multi-version](https://jellyfin.org/docs/general/server/media/movies/#multiple-versions) setups
+- **Resolution Cap** -- Cap a user at 480p/720p/1080p/1440p/4K, measured against the media's real height
+- **Covers Both Playback Paths** -- Applies during negotiation and refuses the direct stream, HLS and original-file routes that skip it
+- **Filename Regex Patterns** -- Legacy matching for [Jellyfin multi-version](https://jellyfin.org/docs/general/server/media/movies/#multiple-versions) setups (inert on Jellyfin 12)
 - **Per-User Assignments** -- Assign different policies to different users
 - **Web Configuration** -- Easy-to-use admin interface in Jellyfin dashboard
 - **Multi-Version Support** -- Seamlessly filter available media versions per user
@@ -128,6 +132,7 @@ Policies define which filename patterns are allowed or blocked. Click **"Add Pol
 | Field | Description |
 |-------|-------------|
 | **Policy Name** | A descriptive name (e.g., "720p Only", "No 4K") |
+| **Maximum Resolution** | The tallest video a user under this policy may be served. Measured against the media's actual height, not its filename. `No limit` (the default) disables the cap. |
 | **Allowed Filename Patterns** | Regex patterns matched against the filename. Files must match at least one pattern. |
 | **Blocked Filename Patterns** | Regex patterns matched against the filename. Matching files are always blocked. |
 | **Custom Intro Video** | Optional intro video for users under this policy. Disable the built-in "Local Intros" plugin if you only want Quality Gate intros. |
@@ -213,13 +218,17 @@ Blocked Filename Patterns:
 
 ## How It Works
 
-1. **Result Filter**: The plugin uses an ASP.NET Core `IAsyncResultFilter` that intercepts API responses **before serialization**, operating on C# objects directly.
+The resolution cap is an ASP.NET Core MVC filter registered through `PostConfigure<MvcOptions>`, so it is still on the filter collection after Jellyfin's own MVC setup has run. It works in two phases, because there are two ways to get video out of Jellyfin and covering only one leaves the other open.
 
-2. **MediaSource Filtering**: When Jellyfin returns media sources/versions to the client, the filter removes blocked versions so they don't appear in the UI.
+1. **Negotiation** (`POST /Items/{id}/PlaybackInfo`): before model binding, the filter adds a required `Height <= cap` video condition to the DeviceProfile in the request body. Jellyfin's `StreamBuilder` turns a failed Height condition into `VideoResolutionNotSupported`, which rules out direct play, and maps the same condition onto the transcode's own `MaxHeight`. On the way back out, the filter checks the response itself: an over-cap source is dropped when a source within the cap exists, so the lower-resolution version of the item is offered instead; when every source is over the cap they are kept but marked transcode-only.
 
-3. **Filename Matching**: Each media version's filename is matched against your policy's regex patterns. For symlinked files, both the symlink filename and the resolved target filename are checked.
+2. **Direct delivery**: `GET /Videos/{id}/stream`, `stream.{container}`, `master.m3u8`, `main.m3u8`, `live.m3u8`, `hls1` segments, `/Audio/{id}/stream` and `/Items/{id}/File` and `/Download` are separate endpoints a client can call without negotiating at all — and the GET form of `PlaybackInfo` applies no limits. The filter answers 403 when the item is over the cap and the request asks for the bytes as they are, or for a transcode not held to the cap. A properly negotiated request carries `MaxHeight` at or below the cap and passes untouched. The legacy `params` query blob is parsed too, because Jellyfin applies its positional fields *inside* the action and they would otherwise overwrite the static flag and the max height after the filter had looked.
 
-4. **File Existence**: Sources whose files don't exist on disk (e.g. dangling symlinks from in-progress transcodes) are automatically hidden, preventing playback errors.
+3. **Unknown heights**: an item with no probed height is allowed and logged as a warning naming the item. A null height means the item was never probed, which cannot be told apart from a plugin defect. Negotiation still holds those items to the cap, because the injected Height condition is marked required and an unknown value fails a required condition.
+
+4. **Failing open**: anything the filter cannot evaluate is logged and allowed. A defect here must never take playback away from everyone.
+
+One route is deliberately not covered: the legacy HLS segment route `/Videos/{itemId}/hls/{playlistId}/{segmentId}.{container}`. Its `itemId` is declared but never read — the file is found purely by `segmentId`, an MD5 of media path, user agent, device id and play session id — so a request cannot be mapped back to an item. It can only return segments already sitting in the transcode folder, which for a restricted user are segments this filter already capped.
 
 ### Library Setup
 

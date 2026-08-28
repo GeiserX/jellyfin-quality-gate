@@ -32,7 +32,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override Guid Id => Guid.Parse("9cab70ca-0af3-4d3a-adab-6a0df2496a33");
 
     /// <inheritdoc />
-    public override string Description => "Assign per-policy intro videos to users. Intro-only build: media source filtering is not active.";
+    public override string Description => "Cap the resolution a user may be served, measured against the media's actual height, and assign per-policy intro videos.";
 
     /// <summary>
     /// Gets the current plugin instance.
