@@ -365,6 +365,35 @@ public static class QualityGateService
     }
 
     /// <summary>
+    /// Orders sources best-first, but never ahead of what the user is allowed to play.
+    /// </summary>
+    /// <remarks>
+    /// This is the order the version picker shows. Putting a source the policy forbids at the
+    /// top of a restricted user's list offers them the one thing they cannot have, so anything
+    /// over the cap sinks below everything within it. With no policy, or a policy with no
+    /// height cap, nothing exceeds and this is plain best-first.
+    /// </remarks>
+    /// <param name="policy">The user's policy, or null when they are unrestricted.</param>
+    /// <param name="sources">The sources to order.</param>
+    /// <returns>The sources, playable ones first and best first within each group.</returns>
+    public static MediaSourceInfo[] OrderForPolicy(QualityPolicy? policy, IEnumerable<MediaSourceInfo>? sources)
+    {
+        if (sources is null)
+        {
+            return Array.Empty<MediaSourceInfo>();
+        }
+
+        return sources
+            .Select((source, index) => (source, index))
+            .OrderBy(x => ExceedsHeightCap(policy, x.source) ? 1 : 0)
+            .ThenByDescending(x => GetVideoHeight(x.source) ?? 0)
+            .ThenByDescending(x => x.source?.Bitrate ?? 0)
+            .ThenBy(x => x.index)
+            .Select(x => x.source)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Orders sources cheapest-first: shortest video, then lowest bitrate.
     /// </summary>
     /// <remarks>

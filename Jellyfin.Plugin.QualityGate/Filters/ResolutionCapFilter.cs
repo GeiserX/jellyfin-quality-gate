@@ -12,6 +12,7 @@ using Jellyfin.Plugin.QualityGate.Services;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.MediaInfo;
+using MediaBrowser.Model.Querying;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -193,6 +194,13 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
                     response.MediaSources = QualityGateService.OrderBestFirst(response.MediaSources);
                 }
             }
+            else if (context.Result is ObjectResult { Value: not null } itemResult)
+            {
+                // The same order has to hold on the item itself. That list is what fills the
+                // version picker, and a client that plays the entry it shows first would walk
+                // straight past the ordering applied above.
+                OrderItemSources(itemResult.Value, GetCappedPolicy(GetUserId(context.HttpContext)));
+            }
         }
         catch (Exception ex)
         {
@@ -204,6 +212,47 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
         }
 
         await next().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Applies the same best-first order to the media sources carried on an item response.
+    /// </summary>
+    /// <param name="value">The result value, which may be a single item or a page of them.</param>
+    /// <param name="policy">The viewer's policy, or null when they are unrestricted.</param>
+    internal static void OrderItemSources(object? value, QualityPolicy? policy)
+    {
+        switch (value)
+        {
+            case BaseItemDto item:
+                OrderOne(item);
+                break;
+
+            case QueryResult<BaseItemDto> page when page.Items != null:
+                foreach (var item in page.Items)
+                {
+                    OrderOne(item);
+                }
+
+                break;
+
+            case IEnumerable<BaseItemDto> items:
+                foreach (var item in items)
+                {
+                    OrderOne(item);
+                }
+
+                break;
+        }
+
+        void OrderOne(BaseItemDto? item)
+        {
+            // One source cannot be out of order, and re-ordering every item in a library page
+            // that carries no sources would be pure overhead.
+            if (item?.MediaSources is { Length: > 1 })
+            {
+                item.MediaSources = QualityGateService.OrderForPolicy(policy, item.MediaSources);
+            }
+        }
     }
 
     /// <summary>
