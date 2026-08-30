@@ -12,6 +12,7 @@ using Jellyfin.Plugin.QualityGate.Services;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
 using MediaBrowser.Model.MediaInfo;
+using MediaBrowser.Model.Querying;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
@@ -186,6 +187,19 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
                 {
                     CapPlaybackInfo(response, policy, userId);
                 }
+                else
+                {
+                    // No cap to apply, but these are exactly the users who were being handed
+                    // the encoded sibling ahead of the original they are entitled to.
+                    response.MediaSources = QualityGateService.OrderBestFirst(response.MediaSources);
+                }
+            }
+            else if (context.Result is ObjectResult { Value: not null } itemResult)
+            {
+                // The same order has to hold on the item itself. That list is what fills the
+                // version picker, and a client that plays the entry it shows first would walk
+                // straight past the ordering applied above.
+                OrderItemSources(itemResult.Value, GetCappedPolicy(GetUserId(context.HttpContext)));
             }
         }
         catch (Exception ex)
@@ -198,6 +212,47 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
         }
 
         await next().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Applies the same best-first order to the media sources carried on an item response.
+    /// </summary>
+    /// <param name="value">The result value, which may be a single item or a page of them.</param>
+    /// <param name="policy">The viewer's policy, or null when they are unrestricted.</param>
+    internal static void OrderItemSources(object? value, QualityPolicy? policy)
+    {
+        switch (value)
+        {
+            case BaseItemDto item:
+                OrderOne(item);
+                break;
+
+            case QueryResult<BaseItemDto> page when page.Items != null:
+                foreach (var item in page.Items)
+                {
+                    OrderOne(item);
+                }
+
+                break;
+
+            case IEnumerable<BaseItemDto> items:
+                foreach (var item in items)
+                {
+                    OrderOne(item);
+                }
+
+                break;
+        }
+
+        void OrderOne(BaseItemDto? item)
+        {
+            // One source cannot be out of order, and re-ordering every item in a library page
+            // that carries no sources would be pure overhead.
+            if (item?.MediaSources is { Length: > 1 })
+            {
+                item.MediaSources = QualityGateService.OrderForPolicy(policy, item.MediaSources);
+            }
+        }
     }
 
     /// <summary>
@@ -218,7 +273,9 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
         var withinCap = sources.Where(s => !QualityGateService.ExceedsHeightCap(policy, s)).ToArray();
         if (withinCap.Length == sources.Count)
         {
-            // Nothing is over the cap. Leave the response untouched.
+            // Nothing is over the cap, so nothing may be removed — but the best of them
+            // still goes first, because clients play MediaSources[0].
+            response.MediaSources = QualityGateService.OrderBestFirst(sources);
             return;
         }
 
@@ -227,7 +284,7 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
             _logger.LogInformation(
                 "QualityGate: capped PlaybackInfo at {Cap}p for user {User} (policy: {Policy}) — offering {Kept} of {Total} sources",
                 policy.MaxHeight, (object)userId, policy.Name, withinCap.Length, sources.Count);
-            response.MediaSources = withinCap;
+            response.MediaSources = QualityGateService.OrderBestFirst(withinCap);
             return;
         }
 
@@ -237,7 +294,10 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
         _logger.LogInformation(
             "QualityGate: every source is above the {Cap}p cap for user {User} (policy: {Policy}) — forcing a capped transcode of {Total} sources",
             policy.MaxHeight, (object)userId, policy.Name, sources.Count);
-        response.MediaSources = QualityGateService.ApplyFallbackTranscode(sources);
+        // Cheapest first: every one of these gets transcoded down to the same cap, so the
+        // smallest source produces the same picture for the least CPU.
+        response.MediaSources = QualityGateService.OrderCheapestFirst(
+            QualityGateService.ApplyFallbackTranscode(sources));
     }
 
     /// <summary>

@@ -336,6 +336,91 @@ public static class QualityGateService
     }
 
     /// <summary>
+    /// Orders sources best-first: tallest video, then highest bitrate.
+    /// </summary>
+    /// <remarks>
+    /// Jellyfin's own order for a multi-version item comes out of how the versions were
+    /// discovered on disk, and for an original whose filename carries no resolution token the
+    /// encoded sibling is promoted ahead of it. Clients play <c>MediaSources[0]</c>, so that
+    /// hands the lesser file to everyone who did not pick a version by hand. A source whose
+    /// height never probed sorts last but keeps its relative position: an unknown height is not
+    /// evidence of quality in either direction, so it must never displace a measured one.
+    /// </remarks>
+    /// <param name="sources">The sources to order.</param>
+    /// <returns>The sources, best first.</returns>
+    public static MediaSourceInfo[] OrderBestFirst(IEnumerable<MediaSourceInfo>? sources)
+    {
+        if (sources is null)
+        {
+            return Array.Empty<MediaSourceInfo>();
+        }
+
+        return sources
+            .Select((source, index) => (source, index))
+            .OrderByDescending(x => GetVideoHeight(x.source) ?? 0)
+            .ThenByDescending(x => x.source?.Bitrate ?? 0)
+            .ThenBy(x => x.index)
+            .Select(x => x.source)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Orders sources best-first, but never ahead of what the user is allowed to play.
+    /// </summary>
+    /// <remarks>
+    /// This is the order the version picker shows. Putting a source the policy forbids at the
+    /// top of a restricted user's list offers them the one thing they cannot have, so anything
+    /// over the cap sinks below everything within it. With no policy, or a policy with no
+    /// height cap, nothing exceeds and this is plain best-first.
+    /// </remarks>
+    /// <param name="policy">The user's policy, or null when they are unrestricted.</param>
+    /// <param name="sources">The sources to order.</param>
+    /// <returns>The sources, playable ones first and best first within each group.</returns>
+    public static MediaSourceInfo[] OrderForPolicy(QualityPolicy? policy, IEnumerable<MediaSourceInfo>? sources)
+    {
+        if (sources is null)
+        {
+            return Array.Empty<MediaSourceInfo>();
+        }
+
+        return sources
+            .Select((source, index) => (source, index))
+            .OrderBy(x => ExceedsHeightCap(policy, x.source) ? 1 : 0)
+            .ThenByDescending(x => GetVideoHeight(x.source) ?? 0)
+            .ThenByDescending(x => x.source?.Bitrate ?? 0)
+            .ThenBy(x => x.index)
+            .Select(x => x.source)
+            .ToArray();
+    }
+
+    /// <summary>
+    /// Orders sources cheapest-first: shortest video, then lowest bitrate.
+    /// </summary>
+    /// <remarks>
+    /// Only for the case where every source is above the cap and all of them will therefore be
+    /// transcoded down to it. The delivered picture is the same whichever source feeds it, so
+    /// the smallest one is the right input: it is the cheapest to decode and scale. Handing a
+    /// 2160p master to a 720p transcode instead buys nothing and costs the most CPU on the box.
+    /// </remarks>
+    /// <param name="sources">The sources to order.</param>
+    /// <returns>The sources, cheapest first.</returns>
+    public static MediaSourceInfo[] OrderCheapestFirst(IEnumerable<MediaSourceInfo>? sources)
+    {
+        if (sources is null)
+        {
+            return Array.Empty<MediaSourceInfo>();
+        }
+
+        return sources
+            .Select((source, index) => (source, index))
+            .OrderBy(x => GetVideoHeight(x.source) ?? int.MaxValue)
+            .ThenBy(x => x.source?.Bitrate ?? int.MaxValue)
+            .ThenBy(x => x.index)
+            .Select(x => x.source)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Filters media sources based on user policy.
     /// </summary>
     /// <param name="userId">The user ID.</param>
