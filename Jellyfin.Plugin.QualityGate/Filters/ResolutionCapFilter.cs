@@ -186,11 +186,12 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
                 {
                     CapPlaybackInfo(response, policy, userId);
                 }
-
-                // Whatever survived the cap, hand the best remaining source over first.
-                // This runs for uncapped users too — they have no cap to apply, but they are
-                // exactly the users who should be getting the original and were not.
-                response.MediaSources = QualityGateService.OrderBestFirst(response.MediaSources);
+                else
+                {
+                    // No cap to apply, but these are exactly the users who were being handed
+                    // the encoded sibling ahead of the original they are entitled to.
+                    response.MediaSources = QualityGateService.OrderBestFirst(response.MediaSources);
+                }
             }
         }
         catch (Exception ex)
@@ -223,7 +224,9 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
         var withinCap = sources.Where(s => !QualityGateService.ExceedsHeightCap(policy, s)).ToArray();
         if (withinCap.Length == sources.Count)
         {
-            // Nothing is over the cap. Leave the response untouched.
+            // Nothing is over the cap, so nothing may be removed — but the best of them
+            // still goes first, because clients play MediaSources[0].
+            response.MediaSources = QualityGateService.OrderBestFirst(sources);
             return;
         }
 
@@ -232,7 +235,7 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
             _logger.LogInformation(
                 "QualityGate: capped PlaybackInfo at {Cap}p for user {User} (policy: {Policy}) — offering {Kept} of {Total} sources",
                 policy.MaxHeight, (object)userId, policy.Name, withinCap.Length, sources.Count);
-            response.MediaSources = withinCap;
+            response.MediaSources = QualityGateService.OrderBestFirst(withinCap);
             return;
         }
 
@@ -242,7 +245,10 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
         _logger.LogInformation(
             "QualityGate: every source is above the {Cap}p cap for user {User} (policy: {Policy}) — forcing a capped transcode of {Total} sources",
             policy.MaxHeight, (object)userId, policy.Name, sources.Count);
-        response.MediaSources = QualityGateService.ApplyFallbackTranscode(sources);
+        // Cheapest first: every one of these gets transcoded down to the same cap, so the
+        // smallest source produces the same picture for the least CPU.
+        response.MediaSources = QualityGateService.OrderCheapestFirst(
+            QualityGateService.ApplyFallbackTranscode(sources));
     }
 
     /// <summary>
