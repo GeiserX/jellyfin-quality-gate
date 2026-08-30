@@ -9,6 +9,7 @@ permissions:
   contents: write
   pages: write
   id-token: write
+  pull-requests: write
 
 jobs:
   check-version:
@@ -104,21 +105,6 @@ jobs:
               f.write('\n')
           "
 
-      # Without this the repo copy never changes, so every release rebuilds the published
-      # manifest from a stale base and it only ever carries the newest version plus whatever
-      # was last committed. That is how 3.3.6.0 and 3.4.0.0 were missing from it entirely.
-      - name: Commit the updated manifest
-        run: |
-          if git diff --quiet -- manifest.json; then
-            echo "manifest unchanged"
-            exit 0
-          fi
-          git config user.name "GeiserX"
-          git config user.email "9169332+GeiserX@users.noreply.github.com"
-          git add manifest.json
-          git commit -m "chore: record v${{ steps.version.outputs.version }} in the manifest"
-          git push origin HEAD:main
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -140,6 +126,31 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
+
+      # main requires a pull request, so this cannot push straight to it. It also runs last and
+      # never fails the job: the release and the published manifest are what users install from,
+      # and on 2026-08-30 a rejected push to main held back v3.6.0.0 entirely. Recording the
+      # version in the repo copy is bookkeeping, and bookkeeping must not gate delivery.
+      - name: Open a pull request recording the manifest
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          if git diff --quiet -- manifest.json; then
+            echo "manifest unchanged"
+            exit 0
+          fi
+          branch="chore/manifest-v${VERSION}"
+          git config user.name "GeiserX"
+          git config user.email "9169332+GeiserX@users.noreply.github.com"
+          git checkout -b "$branch"
+          git add manifest.json
+          git commit -m "chore: record v${VERSION} in the manifest"
+          git push origin "$branch"
+          gh pr create --base main --head "$branch" \
+            --title "chore: record v${VERSION} in the manifest" \
+            --body "The published manifest is rebuilt from the copy in the repo, so a release that never lands here leaves the next one building on a stale base. That is how 3.3.6.0 and 3.4.0.0 went missing from it."
 
   # Publishing the manifest must not depend on cutting a release. The Pages deploy lives in the
   # build job, which is gated on should_release, so a manifest-only fix could never reach
