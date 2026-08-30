@@ -8,6 +8,7 @@ using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Jellyfin.Plugin.QualityGate.Configuration;
 using Jellyfin.Plugin.QualityGate.Filters;
+using Jellyfin.Plugin.QualityGate.Services;
 using MediaBrowser.Common.Configuration;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Model.Dto;
@@ -785,31 +786,35 @@ public class ResolutionCapFilterTests : IDisposable
     }
 
     [Fact]
-    public async Task PlaybackInfo_WhenEverySourceIsWithinCap_IsUntouched()
+    public async Task PlaybackInfo_WhenEverySourceIsWithinCap_KeepsThemAllPlayableBestFirst()
     {
         UseCappedPolicy();
-        var response = ResponseWithHeights(720, 480);
-        var original = response.MediaSources;
+        var response = ResponseWithHeights(480, 720);
 
         var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
         await RunResultAsync(httpContext, response);
 
-        Assert.Same(original, response.MediaSources);
+        // Nothing is over the cap, so nothing may be removed or made unplayable — but the
+        // best of what is left still goes first, because clients play MediaSources[0].
+        Assert.Equal(2, response.MediaSources.Count);
         Assert.All(response.MediaSources, s => Assert.True(s.SupportsDirectPlay));
+        Assert.Equal(720, QualityGateService.GetVideoHeight(response.MediaSources[0]));
     }
 
     [Fact]
-    public async Task PlaybackInfo_UnrestrictedUser_IsUntouched()
+    public async Task PlaybackInfo_UnrestrictedUser_LosesNothingAndGetsTheBestSourceFirst()
     {
         UseFullAccess();
         var response = ResponseWithHeights(1080, 2160);
-        var original = response.MediaSources;
 
         var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST", Guid.NewGuid());
         await RunResultAsync(httpContext, response);
 
-        Assert.Same(original, response.MediaSources);
+        // An uncapped user keeps every source. They are also the users who were being handed
+        // the encoded sibling first, so ordering applies to them too.
+        Assert.Equal(2, response.MediaSources.Count);
         Assert.All(response.MediaSources, s => Assert.True(s.SupportsDirectPlay));
+        Assert.Equal(2160, QualityGateService.GetVideoHeight(response.MediaSources[0]));
     }
 
     [Fact]

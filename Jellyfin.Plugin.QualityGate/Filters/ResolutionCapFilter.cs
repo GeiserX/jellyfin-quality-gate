@@ -186,6 +186,11 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
                 {
                     CapPlaybackInfo(response, policy, userId);
                 }
+
+                // Whatever survived the cap, hand the best remaining source over first.
+                // This runs for uncapped users too — they have no cap to apply, but they are
+                // exactly the users who should be getting the original and were not.
+                response.MediaSources = QualityGateService.OrderBestFirst(response.MediaSources);
             }
         }
         catch (Exception ex)

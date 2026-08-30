@@ -336,6 +336,35 @@ public static class QualityGateService
     }
 
     /// <summary>
+    /// Orders sources best-first: tallest video, then highest bitrate.
+    /// </summary>
+    /// <remarks>
+    /// Jellyfin's own order for a multi-version item comes out of how the versions were
+    /// discovered on disk, and for an original whose filename carries no resolution token the
+    /// encoded sibling is promoted ahead of it. Clients play <c>MediaSources[0]</c>, so that
+    /// hands the lesser file to everyone who did not pick a version by hand. A source whose
+    /// height never probed sorts last but keeps its relative position: an unknown height is not
+    /// evidence of quality in either direction, so it must never displace a measured one.
+    /// </remarks>
+    /// <param name="sources">The sources to order.</param>
+    /// <returns>The sources, best first.</returns>
+    public static MediaSourceInfo[] OrderBestFirst(IEnumerable<MediaSourceInfo>? sources)
+    {
+        if (sources is null)
+        {
+            return Array.Empty<MediaSourceInfo>();
+        }
+
+        return sources
+            .Select((source, index) => (source, index))
+            .OrderByDescending(x => GetVideoHeight(x.source) ?? 0)
+            .ThenByDescending(x => x.source?.Bitrate ?? 0)
+            .ThenBy(x => x.index)
+            .Select(x => x.source)
+            .ToArray();
+    }
+
+    /// <summary>
     /// Filters media sources based on user policy.
     /// </summary>
     /// <param name="userId">The user ID.</param>
