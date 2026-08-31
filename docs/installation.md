@@ -31,12 +31,17 @@ Jellyfin expects this layout:
 config/plugins/
   QualityGate_3.7.0.0/
     Jellyfin.Plugin.QualityGate.dll
-    meta.json
+    build.yaml
+    meta.json          <- written by Jellyfin's installer, not present in the zip
 ```
 
-The folder name is conventionally `Name_Version`, and `meta.json` comes from the release zip.
-Do not hand-write `meta.json`, and never copy one from an older version folder: it carries
-`"status": "Deleted"` and the plugin will remove itself on the next restart.
+The folder name is conventionally `Name_Version`. The release zip contains only the DLL and
+`build.yaml`; `meta.json` is written by Jellyfin itself when it installs from the repository, and
+it is what Jellyfin reads to know which version is installed and whether an update exists.
+
+Do not hand-write `meta.json`, and never copy one from an older version folder. It carries
+`"status": "Deleted"`, and the plugin will remove itself on the next restart. If you need version
+tracking, install from the repository instead of by hand.
 
 ### Docker
 
