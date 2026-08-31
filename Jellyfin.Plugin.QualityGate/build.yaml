@@ -1,6 +1,6 @@
 name: "QualityGate"
 guid: "9cab70ca-0af3-4d3a-adab-6a0df2496a33"
-version: "3.5.0.0"
+version: "3.7.0.0"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "GeiserX"
@@ -11,6 +11,15 @@ imageUrl: ""
 artifacts:
   - Jellyfin.Plugin.QualityGate.dll
 changelog: |
+  ## v3.7.0.0
+  - Version grouping: an encoded copy placed beside its original is grouped with it as an alternate
+    version, wherever the two sit. Jellyfin only does this inside a folder named after the film, so a
+    library whose films sit loose at the root previously showed the copy as a second film
+  - The grouping is re-made every scan, so it survives one, unlike a manual "Merge versions"
+  - A folder is only claimed when there is a real pair to merge; naming, stacking and extra detection
+    still come from Jellyfin itself
+  - Pairing is exact: "Film - 720p.mp4" joins "Film.mkv", "Film - German.mkv" does not
+  - Off by default, with configurable suffixes and library paths
   ## v3.5.0.0
   - Resolution cap enforced on the media's actual height (video MediaStream), not on filenames
   - New per-policy "Maximum Resolution" setting; 0 (No limit) is the default, so existing configs are unchanged

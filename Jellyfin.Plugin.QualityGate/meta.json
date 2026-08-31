@@ -1,12 +1,12 @@
 {
   "category": "General",
-  "changelog": "v3.5.0.0: Resolution cap enforced on the media's actual height instead of its filename. New per-policy Maximum Resolution setting, defaulting to No limit. PlaybackInfo offers a lower-resolution version where one exists and otherwise a capped transcode; the stream, HLS and original-file routes refuse an over-cap item.",
+  "changelog": "v3.7.0.0: An encoded copy placed beside its original is now grouped with it as an alternate version, wherever the two sit, instead of appearing as a second film. The grouping is re-made on every library scan, so it survives one. Off by default.",
   "description": "Quality Gate lets Jellyfin administrators cap the resolution a user may be served. The cap is measured against the media's actual height, read from its video stream, so it holds whatever the file is called. Media above the cap is served as a capped transcode, or as a lower-resolution version of the same item where one exists, and requests for the original file are refused. Useful for bandwidth management and tiered access.",
   "guid": "9cab70ca-0af3-4d3a-adab-6a0df2496a33",
   "name": "QualityGate",
   "overview": "Cap the resolution a user may be served, measured against the media's actual height.",
   "owner": "GeiserX",
   "targetAbi": "12.0.0.0",
-  "timestamp": "2026-08-28T12:00:00Z",
-  "version": "3.5.0.0"
+  "timestamp": "2026-08-31T12:00:00Z",
+  "version": "3.7.0.0"
 }

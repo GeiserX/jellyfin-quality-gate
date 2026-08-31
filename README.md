@@ -29,6 +29,7 @@
 - **Per-User Assignments** -- Assign different policies to different users
 - **Web Configuration** -- Easy-to-use admin interface in Jellyfin dashboard
 - **Multi-Version Support** -- Seamlessly filter available media versions per user
+- **Version Grouping** -- Optional: group an encoded copy with its original wherever the two sit, including a flat library root, where Jellyfin would otherwise show two films
 - **Custom Intros** -- Optional intro video per policy (e.g. a "lite" branding for restricted users)
 - **Dangling Symlink Protection** -- Legacy Jellyfin 10.x behaviour: sources whose files were missing on disk were hidden. Inert on Jellyfin 12 for the same reason as the patterns above
 - **Detailed Logging** -- Full audit trail of access decisions
@@ -281,6 +282,37 @@ The ` - label` suffix is Jellyfin's own naming requirement for merging versions,
 the cap reads. The suffix format has to be there or Jellyfin treats each file as a separate item,
 but the label text itself is free: the cap measures each source's actual height and never looks
 at what the label says.
+
+#### When the films sit loose at the library root
+
+Jellyfin only merges versions inside a folder named after the film. Its rule requires every file
+in the folder to start with the folder's name, so a library laid out like this merges nothing --
+each file becomes its own film:
+
+```text
+movies/
+  Movie (2021).mkv
+  Movie (2021) - 720p.mkv
+  Other Film (1999).mkv
+```
+
+That layout is common when a downloader owns the tree and the files cannot be moved. Turning on
+**Version Grouping** (Dashboard -> Plugins -> QualityGate) groups the two anyway, so viewers see
+one film with a version picker and a capped user gets the copy you already have on disk instead
+of a transcode.
+
+The pairing is exact: a file joins another only when its name is that file's name plus one of the
+configured suffixes, so `Movie (2021) - 720p.mp4` joins `Movie (2021).mkv` while
+`Movie (2021) - German.mkv` does not. The original is always the file without the suffix.
+Containers need not match.
+
+Unlike the **Merge versions** button in the web UI, this holds. That button writes a link the
+next library scan discards, because Jellyfin re-resolves the file as a separate film every time.
+Version grouping is re-made during resolution on every scan, so it survives.
+
+The setting is off by default and applies to movie libraries. A folder is only claimed when there
+is a real pair in it, so naming, stacking and extras still come from Jellyfin itself. Run a
+library scan after turning it on.
 
 ## Building from Source
 

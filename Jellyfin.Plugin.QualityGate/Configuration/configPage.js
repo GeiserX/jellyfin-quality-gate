@@ -463,6 +463,9 @@ function renderAll(view) {
     renderDefaultPolicyDropdown(view);
     renderUserAccess(view);
     view.querySelector('#defaultIntroPath').value = config.DefaultIntroVideoPath || '';
+    view.querySelector('#enableVersionGrouping').checked = Boolean(config.EnableVersionGrouping);
+    view.querySelector('#versionGroupingSuffixes').value = (config.VersionGroupingSuffixes || []).join('\n');
+    view.querySelector('#versionGroupingRoots').value = (config.VersionGroupingRoots || []).join('\n');
     upgradeNativeWidgets(view);
 }
 
@@ -859,7 +862,16 @@ function collectFromDOM(view) {
 
     config.DefaultPolicyId = view.querySelector('#defaultPolicySelect').value;
     config.DefaultIntroVideoPath = view.querySelector('#defaultIntroPath').value.trim();
+    config.EnableVersionGrouping = view.querySelector('#enableVersionGrouping').checked;
+    config.VersionGroupingSuffixes = splitLines(view.querySelector('#versionGroupingSuffixes').value);
+    config.VersionGroupingRoots = splitLines(view.querySelector('#versionGroupingRoots').value);
 
+}
+
+function splitLines(value) {
+    return (value || '').split('\n').filter(function (line) {
+        return line.trim().length > 0;
+    });
 }
 
 function refreshComputedPreview(view) {
@@ -998,6 +1010,9 @@ function loadConfig(view) {
         config.UserPolicies = config.UserPolicies || [];
         config.DefaultPolicyId = config.DefaultPolicyId || '';
         config.DefaultIntroVideoPath = config.DefaultIntroVideoPath || '';
+        config.EnableVersionGrouping = config.EnableVersionGrouping || false;
+        config.VersionGroupingRoots = config.VersionGroupingRoots || [];
+        config.VersionGroupingSuffixes = config.VersionGroupingSuffixes || [' - 720p'];
         // Ensure fields exist on each policy (upgrade from older versions)
         config.Policies.forEach(function (policy) {
             policy.AllowedFilenamePatterns = policy.AllowedFilenamePatterns || [];
