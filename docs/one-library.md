@@ -69,6 +69,19 @@ With the default suffix ` - 720p`:
 Extensions are irrelevant to pairing, and the two files do not need to share one. The original
 is always the file **without** the suffix.
 
+Three sharp edges in the suffix list:
+
+- **Suffixes are not trimmed.** The list is split on newlines and blank lines are dropped, but
+  leading and trailing spaces are kept, which is what makes the default ` - 720p` work. A suffix
+  you typed with a stray trailing space will not match.
+- **Order matters, because the first matching suffix wins.** With `p` listed before ` - 720p`,
+  `Film - 720p` reduces to the stem `Film - 720`, not `Film`, and pairs with nothing. Put the
+  longer, more specific suffixes first.
+- **The rule is quality-blind.** Nothing checks that the suffixed file is actually smaller. Name
+  a 4K file `Film - 720p.mkv` and it becomes the alternate version of `Film.mkv`. The resolution
+  cap still measures the real stream height, so a capped user is not served it, but the version
+  picker will label it misleadingly.
+
 Jellyfin's own rule is looser and would also swallow `Film - German.mkv` as a version of
 `Film.mkv`. This one is deliberately narrower, because a wrongly merged foreign-language cut is
 much more annoying to unpick than an unmerged file.
@@ -93,7 +106,11 @@ merge. A folder of unrelated films is untouched, and everything Jellyfin normall
 naming, stacking, extras detection, still happens.
 
 Files matching `sample` as a whole word, case-insensitively, are ignored, which mirrors
-Jellyfin's own movie resolver. Subdirectories are left alone and recursed into as usual.
+Jellyfin's own movie resolver. When this resolver claims a folder, those sample files are dropped
+from its result entirely rather than passed back as extras. Subdirectories are left alone and
+recursed into as usual.
+
+Switching the feature back off re-splits the groups on the next scan.
 
 ## Path matching
 
@@ -116,8 +133,14 @@ for them.
 
 ## Which version plays
 
-The original, the file without the suffix, is the primary version and plays by default. Both
-appear in the version picker.
+The original, the file without the suffix, becomes the item itself. Its path is the item's path,
+and the encoded copy is attached as an alternate version. Both appear in the version picker.
+
+Which one a client actually plays is a separate question, decided later. Clients play the first
+entry in the media source list, and Jellyfin's own ordering promotes whichever filename carries a
+resolution token, so an untouched list hands the viewer the ` - 720p` encode ahead of the
+original. QualityGate reorders that list best-first at the API layer, which is what makes the
+original play by default. Grouping decides identity; ordering decides playback. You need both.
 
 For a user under a resolution cap, that choice is made again at playback: QualityGate offers the
 version within their cap and refuses the original. See [how it works](how-it-works.md) for the

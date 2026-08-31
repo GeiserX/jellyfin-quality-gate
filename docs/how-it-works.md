@@ -46,8 +46,15 @@ condition into `TranscodeReason.VideoResolutionNotSupported`, which rules out di
 maps the same `LessThanEqual` condition onto the transcode's own `MaxHeight`. An over-cap
 source therefore comes back as a capped transcode instead of the original.
 
+The body rewrite is skipped when the request carries no `DeviceProfile` at all. Inventing one is
+worse than doing nothing, because a profile with no direct-play and no transcoding entries plays
+nothing. For such a client the cap rests entirely on the response rewrite below and on the
+delivery refusals.
+
 **Before serialization**, the filter guarantees the response itself rather than trusting the
-profile injection to have worked:
+profile injection to have worked. This second phase is not gated on the path or the method, so
+`GET /Items/{id}/PlaybackInfo` responses are capped too, even though the body rewrite only
+applies to `POST`:
 
 - If a source within the cap exists, over-cap sources are dropped and the smaller sibling is
   offered instead.
@@ -106,6 +113,17 @@ This is an accepted, known bypass. In practice it can only return segments that 
 in the transcode folder, and for a restricted user those are segments this filter already
 capped. Closing it properly would mean reversing the segment hash or tracking play sessions,
 which is a much larger change than the exposure warrants.
+
+## API keys are not capped
+
+The filter identifies the caller from the `Jellyfin-UserId` claim, falling back to
+`ClaimTypes.NameIdentifier`. It never accepts a caller-supplied `userId` from the query or the
+route, because on the routes it gates the caller does not get to say who they are.
+
+Jellyfin's API-key authentication sets that claim to an empty GUID, and an empty GUID resolves to
+no policy. **A request authenticated with a server API key is therefore unrestricted on every
+route**, as is an anonymous one. That is correct for a server-to-server integration and worth
+knowing before you hand an API key to something a restricted user can reach.
 
 ## Fail open, except once
 

@@ -30,7 +30,12 @@ response, with `Enabled` true.
 item that has never been probed has no height, so it is allowed and a warning is logged.
 Rescan, or check the item's media info.
 
-**5. Read the log.** The filter is talkative on purpose. Search the Jellyfin log for
+**5. Is the request authenticated as a user at all?** Jellyfin's API-key authentication resolves
+to an empty user id, and an empty user id has no policy, so **anything using a server API key is
+unrestricted on every route**. If you are testing with an API key rather than a user's access
+token, you are testing the wrong thing. Anonymous requests pass untouched for the same reason.
+
+**6. Read the log.** The filter is talkative on purpose. Search the Jellyfin log for
 `QualityGate`. When it acts you get lines naming the cap, the user and the policy, for example
 `capped PlaybackInfo at 720p for user ... offering 1 of 2 sources`. If the log says nothing for
 a playback you expected to be capped, the filter did not consider that user restricted, which
