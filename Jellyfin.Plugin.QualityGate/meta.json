@@ -1,6 +1,6 @@
 {
   "category": "General",
-  "changelog": "v3.7.0.0: An encoded copy placed beside its original is now grouped with it as an alternate version, wherever the two sit, instead of appearing as a second film. The grouping is re-made on every library scan, so it survives one. Off by default.",
+  "changelog": "v3.7.0.0: An encoded copy placed beside its original is now grouped with it as an alternate version, wherever the two sit, instead of appearing as a second film. The grouping is rebuilt during every library scan, so it persists across scans. Off by default.",
   "description": "Quality Gate lets Jellyfin administrators cap the resolution a user may be served. The cap is measured against the media's actual height, read from its video stream, so it holds whatever the file is called. Media above the cap is served as a capped transcode, or as a lower-resolution version of the same item where one exists, and requests for the original file are refused. Useful for bandwidth management and tiered access.",
   "guid": "9cab70ca-0af3-4d3a-adab-6a0df2496a33",
   "name": "QualityGate",

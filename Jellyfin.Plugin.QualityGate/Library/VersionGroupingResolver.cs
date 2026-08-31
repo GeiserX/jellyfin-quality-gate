@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Emby.Naming.Common;
 using Emby.Naming.Video;
 using Jellyfin.Data.Enums;
@@ -33,8 +34,12 @@ namespace Jellyfin.Plugin.QualityGate.Library;
 /// unless there is at least one real pair to merge, and Jellyfin's own naming, stacking and extra
 /// detection still do all the work — this only folds the pairs together afterwards.
 /// </remarks>
-public class VersionGroupingResolver : IItemResolver, IMultiItemResolver
+public partial class VersionGroupingResolver : IItemResolver, IMultiItemResolver
 {
+    /// <summary>Mirrors MovieResolver's own sample exclusion, so the same files are ignored.</summary>
+    [GeneratedRegex(@"\bsample\b", RegexOptions.IgnoreCase)]
+    private static partial Regex IsSampleRegex();
+
     private readonly NamingOptions _namingOptions;
     private readonly VideoListResolver _videoListResolver;
     private readonly ILogger<VersionGroupingResolver> _logger;
@@ -100,23 +105,36 @@ public class VersionGroupingResolver : IItemResolver, IMultiItemResolver
             return false;
         }
 
+        // Windows paths are case-insensitive and may be typed with either separator.
+        var comparison = OperatingSystem.IsWindows()
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        var subject = Normalize(path);
+
         for (var i = 0; i < roots.Count; i++)
         {
-            var root = roots[i];
-            if (string.IsNullOrEmpty(root))
+            if (string.IsNullOrEmpty(roots[i]))
             {
                 continue;
             }
 
-            var trimmed = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
-            if (path.Equals(trimmed, StringComparison.Ordinal)
-                || path.StartsWith(trimmed + Path.DirectorySeparatorChar, StringComparison.Ordinal))
+            var root = Normalize(roots[i]);
+            if (root.Length != 0
+                && (subject.Equals(root, comparison)
+                    || subject.StartsWith(root + Path.DirectorySeparatorChar, comparison)))
             {
                 return true;
             }
         }
 
         return false;
+    }
+
+    private static string Normalize(string path)
+    {
+        return path
+            .Replace(Path.AltDirectorySeparatorChar, Path.DirectorySeparatorChar)
+            .TrimEnd(Path.DirectorySeparatorChar);
     }
 
     /// <summary>
@@ -167,7 +185,7 @@ public class VersionGroupingResolver : IItemResolver, IMultiItemResolver
             {
                 return null;
             }
-            else
+            else if (!IsSampleRegex().IsMatch(child.Name))
             {
                 candidates.Add(child);
             }
@@ -251,43 +269,18 @@ public class VersionGroupingResolver : IItemResolver, IMultiItemResolver
             }
 
             var alternates = new List<string>();
+
+            // Anything Jellyfin already grouped stays grouped, then the encoded copies join it.
             foreach (var existing in video.AlternateVersions)
             {
-                if (existing.Files.Count > 0)
-                {
-                    alternates.Add(existing.Files[0].Path);
-                    foreach (var file in existing.Files)
-                    {
-                        covered.Add(file.Path);
-                    }
-                }
+                Take(existing, alternates, covered);
             }
 
             if (alternatesOf.TryGetValue(i, out var mine))
             {
                 foreach (var index in mine)
                 {
-                    var child = groups[index];
-                    if (child.Files.Count > 0)
-                    {
-                        alternates.Add(child.Files[0].Path);
-                        foreach (var file in child.Files)
-                        {
-                            covered.Add(file.Path);
-                        }
-                    }
-
-                    foreach (var nested in child.AlternateVersions)
-                    {
-                        if (nested.Files.Count > 0)
-                        {
-                            alternates.Add(nested.Files[0].Path);
-                            foreach (var file in nested.Files)
-                            {
-                                covered.Add(file.Path);
-                            }
-                        }
-                    }
+                    Take(groups[index], alternates, covered);
                 }
             }
 
@@ -317,6 +310,24 @@ public class VersionGroupingResolver : IItemResolver, IMultiItemResolver
             parent.Path);
 
         return result;
+    }
+
+    /// <summary>
+    /// Records a version as an alternate and marks every file it spans as accounted for, so no
+    /// file is left to be resolved a second time as a film of its own.
+    /// </summary>
+    private static void Take(VideoInfo version, List<string> alternates, HashSet<string> covered)
+    {
+        if (version.Files.Count == 0)
+        {
+            return;
+        }
+
+        alternates.Add(version.Files[0].Path);
+        foreach (var file in version.Files)
+        {
+            covered.Add(file.Path);
+        }
     }
 
     /// <summary>

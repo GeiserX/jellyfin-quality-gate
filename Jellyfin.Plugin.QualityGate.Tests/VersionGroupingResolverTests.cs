@@ -227,6 +227,85 @@ public class VersionGroupingResolverTests : IDisposable
     }
 
     [Fact]
+    public void AMalformedEntry_DoesNotBreakTheScan()
+    {
+        // A throw during resolution would abort the library scan, so it has to degrade to "not mine".
+        Enable();
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv");
+        files.Add(new FileSystemMetadata { FullName = null!, Name = null!, IsDirectory = false });
+
+        Assert.Null(Resolve(files));
+    }
+
+    [Fact]
+    public void OnlyOneRealFileAmongTheEntries_ClaimsNothing()
+    {
+        Enable();
+        var files = Files("Alien (1979).mkv");
+        var sub = Path.Combine(_tempDir, "Some Folder");
+        Directory.CreateDirectory(sub);
+        files.Add(new FileSystemMetadata { FullName = sub, Name = "Some Folder", IsDirectory = true });
+
+        Assert.Null(Resolve(files));
+    }
+
+    [Fact]
+    public void SampleFiles_AreNotFilms()
+    {
+        // Jellyfin's own movie resolver drops these before resolving; so must this.
+        Enable();
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv", "Alien (1979)-sample.mkv");
+
+        var result = Resolve(files);
+
+        Assert.NotNull(result);
+        Assert.Single(result!.Items);
+        Assert.DoesNotContain(result.Items, i => i.Path.Contains("sample", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Fact]
+    public void NoConfiguredRoots_MeansEveryMovieLibrary()
+    {
+        Enable();
+        _plugin.Configuration.VersionGroupingRoots = null!;
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv");
+
+        Assert.NotNull(Resolve(files));
+    }
+
+    [Fact]
+    public void ARootWithATrailingSlash_StillMatches()
+    {
+        Enable(_tempDir + Path.DirectorySeparatorChar);
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv");
+
+        Assert.NotNull(Resolve(files));
+    }
+
+    [Fact]
+    public void ASiblingDirectoryWithASharedPrefix_IsNotInsideTheRoot()
+    {
+        // "/media/Pel" must not swallow "/media/Peliculas".
+        Enable(_tempDir + "-other");
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv");
+
+        Assert.Null(Resolve(files));
+    }
+
+    [Fact]
+    public void ThreeDFormat_IsCarriedOntoTheGroupedFilm()
+    {
+        Enable();
+        var files = Files("Alien (1979) 3d hsbs.mkv", "Alien (1979) 3d hsbs - 720p.mkv");
+
+        var result = Resolve(files);
+
+        Assert.NotNull(result);
+        var movie = Assert.Single(result!.Items);
+        Assert.Equal(MediaBrowser.Model.Entities.Video3DFormat.HalfSideBySide, ((Video)movie).Video3DFormat);
+    }
+
+    [Fact]
     public void Directories_ArePassedThroughForNormalResolution()
     {
         Enable();
