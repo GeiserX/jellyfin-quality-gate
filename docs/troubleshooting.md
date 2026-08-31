@@ -31,9 +31,12 @@ item that has never been probed has no height, so it is allowed and a warning is
 Rescan, or check the item's media info.
 
 **5. Is the request authenticated as a user at all?** Jellyfin's API-key authentication resolves
-to an empty user id, and an empty user id has no policy, so **anything using a server API key is
-unrestricted on every route**. If you are testing with an API key rather than a user's access
-token, you are testing the wrong thing. Anonymous requests pass untouched for the same reason.
+to an empty user id, which matches no assignment, so **an API key is uncapped on every route unless
+you set one**. If you are testing with an API key rather than a user's access token, you are
+testing the wrong thing. Anonymous requests behave the same way. To cap them, set
+**API key and anonymous requests** in the admin page. If you already did and it is not taking
+effect, check that the policy it names still exists and is enabled: an unresolvable one leaves
+those requests uncapped by design.
 
 **6. Read the log.** The filter is talkative on purpose. Search the Jellyfin log for
 `QualityGate`. When it acts you get lines naming the cap, the user and the policy, for example

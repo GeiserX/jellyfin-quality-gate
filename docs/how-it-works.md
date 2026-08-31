@@ -120,10 +120,20 @@ The filter identifies the caller from the `Jellyfin-UserId` claim, falling back 
 `ClaimTypes.NameIdentifier`. It never accepts a caller-supplied `userId` from the query or the
 route, because on the routes it gates the caller does not get to say who they are.
 
-Jellyfin's API-key authentication sets that claim to an empty GUID, and an empty GUID resolves to
-no policy. **A request authenticated with a server API key is therefore unrestricted on every
-route**, as is an anonymous one. That is correct for a server-to-server integration and worth
-knowing before you hand an API key to something a restricted user can reach.
+Jellyfin's API-key authentication sets that claim to an empty GUID, so such a request matches no
+assignment and takes no default. Left alone it is **unrestricted on every route**, as is an
+anonymous one. That is right for a server-to-server integration and wrong once the key reaches
+something a capped viewer drives.
+
+Since 3.8.0.0 you can close that. **API key and anonymous requests** in the admin page names the
+policy those requests are held to. It is unset by default, so upgrading changes nothing and no
+existing integration starts transcoding without you asking for it.
+
+It is deliberately separate from the default policy. A default policy is about people, and folding
+API keys into it would silently cap every media-serving integration the moment someone set one.
+For the same reason, an API-key policy that has been deleted or disabled leaves those requests
+uncapped rather than denying them: the operator's intent is no longer knowable, and guessing would
+take out an integration rather than a person.
 
 ## Fail open, except once
 

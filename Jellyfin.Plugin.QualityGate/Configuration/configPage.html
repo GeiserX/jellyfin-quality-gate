@@ -521,6 +521,18 @@
                                 Fallback intro for users whose policy has no custom intro. Leave empty to disable.
                             </div>
                         </div>
+                        <div class="selectContainer">
+                            <label class="selectLabel" for="apiKeyPolicySelect">API key and anonymous requests</label>
+                            <select is="emby-select" id="apiKeyPolicySelect">
+                                <option value="">(Uncapped)</option>
+                            </select>
+                            <div class="fieldDescription">
+                                An API key carries no user, so no policy matches it and requests made with
+                                one are served uncapped. The same is true of unauthenticated requests. Pick a
+                                policy to cap them. Leave this unset unless something a capped viewer can
+                                reach holds an API key, because it applies to every integration that uses one.
+                            </div>
+                        </div>
                     </div>
 
                     <div class="verticalSection">

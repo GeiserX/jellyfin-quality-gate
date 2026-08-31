@@ -74,6 +74,7 @@ public class ResolutionCapFilterTests : IDisposable
         _plugin.Configuration.UserPolicies = config.UserPolicies;
         _plugin.Configuration.DefaultPolicyId = config.DefaultPolicyId;
         _plugin.Configuration.DefaultIntroVideoPath = config.DefaultIntroVideoPath;
+        _plugin.Configuration.ApiKeyPolicyId = config.ApiKeyPolicyId;
     }
 
     /// <summary>Applies a policy capped at 720p to every user without an override.</summary>
@@ -648,6 +649,75 @@ public class ResolutionCapFilterTests : IDisposable
         SetItemHeight(1080);
 
         var httpContext = CreateHttpContext(StreamPath());
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
+    public async Task ApiKeyRequest_IsRefused_OnceAnApiKeyPolicyIsConfigured()
+    {
+        // The counterpart to AnonymousRequest_IsNotEvaluated above, which pins the default: with
+        // nothing configured a request carrying no user is served uncapped. Here the operator has
+        // opted in, so the same request must now be held to the cap.
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "p1",
+        });
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task ApiKeyRequest_WithinTheCap_IsStillAllowed()
+    {
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "p1",
+        });
+        SetItemHeight(Cap);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
+    public async Task ApiKeyPolicyPointingAtNothing_LeavesTheRequestUncapped()
+    {
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "deleted-policy",
+        });
+        SetItemHeight(2160);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
 
         var (allowed, context) = await RunResourceAsync(httpContext);
 

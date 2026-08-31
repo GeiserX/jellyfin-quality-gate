@@ -1,6 +1,6 @@
 var PLUGIN_ID = '9cab70ca-0af3-4d3a-adab-6a0df2496a33';
 var FULL_ACCESS_POLICY_ID = '__FULL_ACCESS__';
-var config = { Policies: [], UserPolicies: [], DefaultPolicyId: '', DefaultIntroVideoPath: '' };
+var config = { Policies: [], UserPolicies: [], DefaultPolicyId: '', DefaultIntroVideoPath: '', ApiKeyPolicyId: '' };
 var users = [];
 var isLoaded = false;
 var userAccessPageSize = 10;
@@ -68,6 +68,7 @@ function setStaticControlsEnabled(view, enabled) {
     var saveButton = view.querySelector('button[type="submit"]');
     var addPolicyButton = view.querySelector('#btnAddPolicy');
     var defaultPolicySelect = view.querySelector('#defaultPolicySelect');
+    var apiKeyPolicySelect = view.querySelector('#apiKeyPolicySelect');
     var defaultIntroPath = view.querySelector('#defaultIntroPath');
 
     if (saveButton) {
@@ -82,6 +83,10 @@ function setStaticControlsEnabled(view, enabled) {
         defaultPolicySelect.disabled = !enabled;
     }
 
+    if (apiKeyPolicySelect) {
+        apiKeyPolicySelect.disabled = !enabled;
+    }
+
     if (defaultIntroPath) {
         defaultIntroPath.disabled = !enabled;
     }
@@ -91,6 +96,7 @@ function resetViewState(view) {
     view.querySelector('#policiesContainer').innerHTML = '';
     view.querySelector('#userAccessContainer').innerHTML = '';
     view.querySelector('#defaultPolicySelect').innerHTML = '<option value="">(No default - Full Access)</option>';
+    view.querySelector('#apiKeyPolicySelect').innerHTML = '<option value="">(Uncapped)</option>';
     view.querySelector('#defaultIntroPath').value = '';
 }
 
@@ -461,6 +467,7 @@ function clampUserAccessPage() {
 function renderAll(view) {
     renderPolicies(view);
     renderDefaultPolicyDropdown(view);
+    renderApiKeyPolicyDropdown(view);
     renderUserAccess(view);
     view.querySelector('#defaultIntroPath').value = config.DefaultIntroVideoPath || '';
     view.querySelector('#enableVersionGrouping').checked = Boolean(config.EnableVersionGrouping);
@@ -614,6 +621,44 @@ function renderDefaultPolicyDropdown(view) {
         }
         select.appendChild(option);
     });
+}
+
+function renderApiKeyPolicyDropdown(view) {
+    var select = view.querySelector('#apiKeyPolicySelect');
+    var current = config.ApiKeyPolicyId;
+    var matched = false;
+
+    if (!select) {
+        return;
+    }
+
+    select.innerHTML = '';
+    select.innerHTML += '<option value=""' + (!current ? ' selected' : '') + '>(Uncapped)</option>';
+
+    config.Policies.forEach(function (policy) {
+        var option;
+
+        if (policy.Enabled === false) {
+            return;
+        }
+
+        option = document.createElement('option');
+        option.value = policy.Id;
+        option.textContent = policy.Name || 'Unnamed Policy';
+        if (current === policy.Id) {
+            option.selected = true;
+            matched = true;
+        }
+        select.appendChild(option);
+    });
+
+    // A configured id that no longer resolves leaves API keys uncapped, so say so rather than
+    // silently selecting "(Uncapped)" and letting a save quietly discard the setting.
+    if (current && !matched) {
+        select.innerHTML += '<option value="' + escapeAttribute(current) + '" selected>' +
+            'INVALID POLICY - currently uncapped' +
+            '</option>';
+    }
 }
 
 function renderUserAccess(view) {
@@ -861,6 +906,7 @@ function collectFromDOM(view) {
     });
 
     config.DefaultPolicyId = view.querySelector('#defaultPolicySelect').value;
+    config.ApiKeyPolicyId = view.querySelector('#apiKeyPolicySelect').value;
     config.DefaultIntroVideoPath = view.querySelector('#defaultIntroPath').value.trim();
     config.EnableVersionGrouping = view.querySelector('#enableVersionGrouping').checked;
     config.VersionGroupingSuffixes = splitLines(view.querySelector('#versionGroupingSuffixes').value);
@@ -881,6 +927,7 @@ function refreshComputedPreview(view) {
 
     collectFromDOM(view);
     renderDefaultPolicyDropdown(view);
+    renderApiKeyPolicyDropdown(view);
     renderUserAccess(view);
     upgradeNativeWidgets(view);
 }
@@ -1010,6 +1057,7 @@ function loadConfig(view) {
         config.UserPolicies = config.UserPolicies || [];
         config.DefaultPolicyId = config.DefaultPolicyId || '';
         config.DefaultIntroVideoPath = config.DefaultIntroVideoPath || '';
+        config.ApiKeyPolicyId = config.ApiKeyPolicyId || '';
         config.EnableVersionGrouping = config.EnableVersionGrouping || false;
         config.VersionGroupingRoots = config.VersionGroupingRoots || [];
         config.VersionGroupingSuffixes = config.VersionGroupingSuffixes || [' - 720p'];
@@ -1147,7 +1195,7 @@ export default function (view) {
             return;
         }
 
-        if (event.target.matches('#defaultPolicySelect, .policy-enabled, .policy-fallback-transcode, .policy-name')) {
+        if (event.target.matches('#defaultPolicySelect, #apiKeyPolicySelect, .policy-enabled, .policy-fallback-transcode, .policy-name')) {
             refreshComputedPreview(view);
         }
 

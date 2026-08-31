@@ -77,6 +77,34 @@ public static class QualityGateService
     }
 
     /// <summary>
+    /// Gets the policy for a request that resolves to no user.
+    /// </summary>
+    /// <remarks>
+    /// Jellyfin's API-key authentication issues <see cref="Guid.Empty"/> rather than a user id, and
+    /// an unauthenticated request carries none either, so neither can be matched to an assignment.
+    /// Left alone they are served uncapped, which is correct for a server-to-server integration and
+    /// wrong once the key reaches something a capped viewer drives.
+    ///
+    /// This is opt-in through <see cref="PluginConfiguration.ApiKeyPolicyId"/> rather than folded
+    /// into <see cref="PluginConfiguration.DefaultPolicyId"/>, because a default policy is about
+    /// people, and silently capping API keys on upgrade would break media-serving integrations that
+    /// were working the day before. Unlike a user assignment this does NOT fall back to the deny-all
+    /// sentinel: a configured id that no longer resolves means the operator's intent is unknown, and
+    /// guessing at it here would take out an integration rather than a person.
+    /// </remarks>
+    /// <returns>The configured policy, or null when unset or unresolvable.</returns>
+    public static QualityPolicy? GetApiKeyPolicy()
+    {
+        var config = Plugin.Instance?.Configuration;
+        if (config == null || string.IsNullOrEmpty(config.ApiKeyPolicyId))
+        {
+            return null;
+        }
+
+        return config.Policies.FirstOrDefault(p => p.Id == config.ApiKeyPolicyId && p.Enabled);
+    }
+
+    /// <summary>
     /// Checks whether the policy caps the resolution a user may be served.
     /// </summary>
     /// <param name="policy">The quality policy.</param>

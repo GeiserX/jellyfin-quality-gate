@@ -45,6 +45,7 @@ nobody. If you are migrating from 3.3.x or earlier, translate your patterns into
 | `UserPolicies` | list | empty | Which user gets which policy |
 | `DefaultPolicyId` | string | empty | Policy for users with no explicit assignment. Empty means unrestricted |
 | `DefaultIntroVideoPath` | string | empty | Intro played when a user's policy names none |
+| `ApiKeyPolicyId` | string | empty | Policy applied to API-key and anonymous requests, which carry no user. Empty leaves them uncapped |
 | `EnableVersionGrouping` | bool | `false` | Group an encoded copy with its original. See [one library, two qualities](one-library.md) |
 | `VersionGroupingRoots` | list | empty | Library paths where grouping applies. Empty means every movie library |
 | `VersionGroupingSuffixes` | list | `[" - 720p"]` | Suffixes that mark a file as an encoded copy |
@@ -74,6 +75,10 @@ information at all.
 | `PolicyId` | A policy `Id`, or `__FULL_ACCESS__` for explicitly unrestricted, or empty to fall through to the default |
 
 ## How a user's policy is chosen
+
+A request that resolves to no user at all, which is what an API key and an unauthenticated
+request both produce, does not enter this table. It takes `ApiKeyPolicyId`, or no policy when that
+is unset. See [how it works](how-it-works.md#api-keys-are-not-capped).
 
 ```text
 explicit assignment for this user?
