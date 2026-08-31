@@ -55,7 +55,7 @@ namespace Jellyfin.Plugin.QualityGate.Filters;
 /// agent, device id and play session id — so a request cannot be mapped back to an item and
 /// this filter has nothing to check. It can only return segments that already exist in the
 /// transcode folder, which for a restricted user are segments this filter already capped.
-/// README.md records it as an accepted, known bypass and what closing it would take.
+/// docs/how-it-works.md records it as an accepted, known bypass and what closing it would take.
 ///
 /// The filter fails OPEN everywhere except one place. An unreadable body, an item it cannot
 /// resolve or an unexpected exception is logged and allowed, because a plugin defect must not

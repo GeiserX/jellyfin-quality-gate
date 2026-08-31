@@ -2,12 +2,20 @@
   {
     "guid": "9cab70ca-0af3-4d3a-adab-6a0df2496a33",
     "name": "QualityGate",
-    "overview": "Restrict users to specific media versions based on filename regex patterns.",
-    "description": "Quality Gate allows Jellyfin administrators to restrict users to specific media versions via filename regex patterns. Designed for Jellyfin multi-version naming (e.g. 'Movie (2021) - 1080p.mkv'). Useful for bandwidth management, tiered access, and device optimization.",
+    "overview": "Cap the resolution a user may be served, measured against the media's actual height.",
+    "description": "Quality Gate lets Jellyfin administrators cap the resolution a user may be served. The cap is measured against the media's actual height, read from its video stream, so it holds whatever the file is called. Media above the cap is served as a capped transcode, or as a lower-resolution version of the same item where one exists, and requests for the original file are refused. Useful for bandwidth management and tiered access.",
     "owner": "GeiserX",
     "category": "General",
     "imageUrl": "",
     "versions": [
+      {
+        "version": "3.7.0.0",
+        "changelog": "See https://github.com/GeiserX/quality-gate/releases",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/GeiserX/quality-gate/releases/download/v3.7.0.0/quality-gate_3.7.0.0.zip",
+        "checksum": "4092e864c3f48d718b75ea4b8aba3dbf",
+        "timestamp": "2026-08-31T13:13:50Z"
+      },
       {
         "version": "3.5.0.0",
         "changelog": "See https://github.com/GeiserX/quality-gate/releases",

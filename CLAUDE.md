@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Description**: Jellyfin plugin that restricts users to specific media versions based on filename regex patterns. Filters blocked MediaSources from API responses so restricted users only see allowed versions (e.g., 720p transcodes but not 4K originals). Designed for Jellyfin's multi-version naming convention (`Movie (2021) - 720p.mkv`).
+**Description**: Jellyfin plugin that caps the resolution a user may be served. The cap is measured against the media's actual height, read from its video `MediaStream`, never against the filename, so it survives a rename or a symlink. Over-cap media is served as a capped transcode or as a lower-resolution version of the same item, and requests for the original file are refused. Optionally groups an encoded copy with its original so one film shows two versions rather than appearing twice. Filename regex patterns are legacy and enforce nothing on Jellyfin 12; see [docs/configuration.md](docs/configuration.md#fields-that-do-nothing).
 
 **Architecture Pattern**: Monolith - single deployable unit (Jellyfin plugin DLL)
 
@@ -71,8 +71,8 @@ It covers both ways video leaves the server:
 
 One route is deliberately not covered: the legacy HLS segment route
 `/Videos/{id}/hls/{playlistId}/{segmentId}.{container}`, whose `itemId` is declared and never
-read. [README.md](README.md#known-bypass-the-legacy-hls-segment-route) records it as an
-accepted, known bypass and what closing it would take.
+read. [docs/how-it-works.md](docs/how-it-works.md#the-one-route-that-is-not-covered) records it
+as an accepted, known bypass and what closing it would take.
 
 The filter fails open everywhere except one place. A delivery request from a user it has
 already established is capped fails **closed**: by then the only open question is how tall the
