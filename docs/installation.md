@@ -27,7 +27,7 @@ inside a folder under `plugins/`.
 
 Jellyfin expects this layout:
 
-```
+```text
 config/plugins/
   QualityGate_3.7.0.0/
     Jellyfin.Plugin.QualityGate.dll
@@ -61,16 +61,29 @@ sudo systemctl restart jellyfin
 
 ### Windows
 
-Extract the release zip to `%LOCALAPPDATA%\jellyfin\plugins\QualityGate_<version>\`, then
-restart Jellyfin from Services or the tray icon.
+There are two data directories, and which one applies depends on how Jellyfin was installed:
+
+- Installed as a **Windows service** (the default installer):
+  `%PROGRAMDATA%\Jellyfin\Server\plugins\QualityGate_<version>\`
+- **Portable** or tray builds run under your own account:
+  `%LOCALAPPDATA%\jellyfin\plugins\QualityGate_<version>\`
+
+Putting the DLL in the wrong one leaves it outside the folder Jellyfin scans, and it will simply
+never appear. Confirm which applies from **Dashboard, About**, then restart Jellyfin from
+Services or the tray icon.
 
 ### macOS
 
+Use whichever data directory your install actually reports, rather than assuming. Check
+**Dashboard, About**, or `JELLYFIN_DATA_DIR` if you set it. For a default install that is
+`~/.local/share/jellyfin`.
+
 ```bash
 VERSION="3.7.0.0"
+DATA_DIR="$HOME/.local/share/jellyfin"   # confirm this against Dashboard, About
 curl -L -o QualityGate.zip \
   "https://github.com/GeiserX/quality-gate/releases/download/v${VERSION}/quality-gate_${VERSION}.zip"
-unzip QualityGate.zip -d ~/.local/share/jellyfin/plugins/QualityGate_${VERSION}/
+unzip QualityGate.zip -d "$DATA_DIR/plugins/QualityGate_${VERSION}/"
 ```
 
 ## Upgrading

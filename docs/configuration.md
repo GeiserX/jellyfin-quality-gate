@@ -1,13 +1,13 @@
 # Configuration
 
-Every setting QualityGate stores, what it does, and which ones currently do nothing.
+Every setting QualityGate stores, what it does, and which ones do not restrict playback.
 
 Configuration lives in `config/plugins/configurations/Jellyfin.Plugin.QualityGate.xml` on the
 server, outside the plugin folder. That matters: it survives the plugin being removed,
 reinstalled or purged. An unloaded plugin returns an empty policy list from the API, which
 looks like data loss and is not.
 
-## Fields that do nothing
+## Fields that do not restrict playback
 
 Read this first. It is the single thing most likely to waste your afternoon.
 
@@ -75,7 +75,7 @@ information at all.
 
 ## How a user's policy is chosen
 
-```
+```text
 explicit assignment for this user?
 ├── __FULL_ACCESS__      -> unrestricted
 ├── a policy id           -> that policy, if it exists AND is enabled
@@ -108,7 +108,7 @@ Ask the server:
 
 ```bash
 curl -s -H 'Authorization: MediaBrowser Token="<admin-token>"' \
-  'http://your-server:8096/Plugins/9cab70ca0af34d3aadab6a0df2496a33/Configuration' \
+  'https://your-server/Plugins/9cab70ca0af34d3aadab6a0df2496a33/Configuration' \
   | python3 -m json.tool
 ```
 

@@ -13,7 +13,7 @@ Jellyfin does merge alternate versions, but only inside a folder named after the
 keys grouping to the containing folder's name and requires every file to start with it. So this
 works out of the box:
 
-```
+```text
 Films/
   Blade Runner (1982)/
     Blade Runner (1982).mkv
@@ -22,7 +22,7 @@ Films/
 
 and this does not:
 
-```
+```text
 Films/
   Blade Runner (1982).mkv
   Blade Runner (1982) - 720p.mp4      <- shows up as a second film

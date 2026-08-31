@@ -34,8 +34,9 @@ Open **Dashboard, Plugins, QualityGate**.
 1. Under **Policies**, add a policy.
 2. Name it something you will recognise later, for example `720p Only`.
 3. Set **Maximum Resolution** to **720p**.
-4. Leave everything else alone. Several of the other fields do nothing in the current build,
-   and [configuration](configuration.md#fields-that-do-nothing) explains exactly which.
+4. Leave everything else alone. Several of the other fields do not restrict playback in the
+   current build, and [configuration](configuration.md#fields-that-do-not-restrict-playback)
+   explains exactly which.
 5. Save.
 
 **Maximum Resolution is the only field that restricts playback.** If you set it to `No limit`,
@@ -61,8 +62,16 @@ unloaded plugin looks exactly like a loaded one that is allowing everything.
 
 Sign in as the capped user and play something you know is 1080p or larger. You should see it
 play, because QualityGate does not hide media. What changes is how it is delivered. Check
-**Dashboard, Activity** while it plays: the session should say **Transcoding**, with an output
-height at or below your cap, rather than **Direct playing**.
+**Dashboard, Activity** while it plays and look at the height being served, not at the delivery
+mode.
+
+Two outcomes are both correct, and which one you get depends on the media:
+
+- **A capped transcode** of the original, when that item has no smaller version.
+- **Direct play of a smaller version** of the same item, when one exists. QualityGate offers the
+  within-cap sibling instead of transcoding, which is cheaper and looks the same to the viewer.
+
+So "Direct playing" is not a failure on its own. Being served a height above your cap is.
 
 For a harder check, ask the server for the original bytes directly. As the capped user, with
 their access token:
@@ -70,7 +79,7 @@ their access token:
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
   -H 'Authorization: MediaBrowser Token="<capped-user-token>"' \
-  'http://your-server:8096/Items/<item-id>/Download'
+  'https://your-server/Items/<item-id>/Download'
 ```
 
 A capped user must get `403` for an item above the cap. If you get `200`, the cap is not
@@ -79,7 +88,8 @@ know the test itself is meaningful.
 
 ## What to read next
 
-- [Configuration](configuration.md) for every setting, and for the ones that do nothing.
+- [Configuration](configuration.md) for every setting, and for the ones that do not restrict
+  playback.
 - [How it works](how-it-works.md) for the routes that are covered, and the one that is not.
 - [One library, two qualities](one-library.md) if you keep a smaller encode beside each
   original and want both to appear as a single item.

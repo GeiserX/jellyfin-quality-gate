@@ -13,7 +13,7 @@ you want to know whether the cap actually holds, or you are deciding how much to
 `MediaSourceResultFilter` is in the assembly but deliberately not registered. Its
 filename-pattern rewriting has not been revalidated against the Jellyfin 12 ABI, and the
 resolution cap does not need it. Everything it used to read is listed in
-[the fields that do nothing](configuration.md#fields-that-do-nothing).
+[the fields that do not restrict playback](configuration.md#fields-that-do-not-restrict-playback).
 
 The filter is added with `PostConfigure<MvcOptions>` rather than `Configure`. A plugin's
 `RegisterServices` runs from `ApplicationHost.Init`, before the web host runs
@@ -101,7 +101,7 @@ by `?params=;;;true`. The filter reads the blob.
 
 ## The one route that is not covered
 
-```
+```text
 /Videos/{itemId}/hls/{playlistId}/{segmentId}.{container}
 ```
 

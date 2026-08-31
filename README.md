@@ -30,7 +30,7 @@ instead of appearing twice.
 |---|---|
 | [Getting started](docs/getting-started.md) | Install, cap one user at 720p, and prove the cap holds |
 | [Installation](docs/installation.md) | Every install method, upgrading, building from source, releases |
-| [Configuration](docs/configuration.md) | Every setting, how a user's policy is chosen, **and the fields that do nothing** |
+| [Configuration](docs/configuration.md) | Every setting, how a user's policy is chosen, **and the fields that do not restrict playback** |
 | [How it works](docs/how-it-works.md) | The routes covered, the one that is not, and what to trust |
 | [One library, two qualities](docs/one-library.md) | Keeping a smaller encode beside each original |
 | [Troubleshooting](docs/troubleshooting.md) | When it is not behaving |
@@ -47,7 +47,7 @@ playback. The same goes for the fallback-transcode and blocked-message settings.
 `- 2160p` by filename pattern and leaves the resolution at `No limit` restricts nobody. If you
 are coming from 3.3.x or earlier, translate your patterns into a height.
 
-[Configuration](docs/configuration.md#fields-that-do-nothing) lists the inert fields exactly.
+[Configuration](docs/configuration.md#fields-that-do-not-restrict-playback) lists them exactly.
 
 ## What it does
 
@@ -58,8 +58,9 @@ are coming from 3.3.x or earlier, translate your patterns into a height.
   is a known, documented exception.
 - **Per-user policies.** Assign policies individually, set a default, or mark a user explicitly
   unrestricted.
-- **Version grouping.** Optional. Groups `Film - 720p.mp4` with `Film.mkv` wherever the two sit,
-  including a flat library root where Jellyfin would otherwise show two films. Rebuilt on every
+- **Version grouping.** Optional, movies libraries only. Groups `Film - 720p.mp4` with
+  `Film.mkv` wherever the two sit, including a flat library root where Jellyfin would otherwise
+  show two films. Applies to every movie library, or only the paths you list. Rebuilt on every
   scan, so it persists where a manual merge does not.
 - **Per-policy intro videos.** Optional. A different pre-roll for restricted users.
 - **Logging you can debug from.** Every decision names the cap, the user and the policy.
@@ -73,7 +74,7 @@ the last build for 10.11 and is unmaintained.
 
 Add this repository under **Dashboard, Plugins, Repositories**:
 
-```
+```text
 https://geiserx.github.io/quality-gate/manifest.json
 ```
 
@@ -85,8 +86,11 @@ instructions, including manual installs, are in [installation](docs/installation
 1. **Dashboard, Plugins, QualityGate**.
 2. Add a policy, name it, set **Maximum Resolution** to `720p`. Leave the rest alone.
 3. Assign a user to it in the **User Access** table.
-4. Sign in as that user and play something in 1080p. It should transcode down rather than direct
-   play.
+4. Sign in as that user and play something in 1080p. Check **Dashboard, Activity**: the video
+   being served must be at or below your cap. Both outcomes are correct, and which you get
+   depends on the media. A capped transcode of the original, or direct play of a smaller version
+   of the same item where one exists. Seeing "Direct playing" is not a failure by itself; being
+   served something taller than the cap is.
 
 Then verify it properly, because an unloaded plugin is indistinguishable from a working one that
 allows everything:
@@ -94,7 +98,7 @@ allows everything:
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
   -H 'Authorization: MediaBrowser Token="<capped-user-token>"' \
-  'http://your-server:8096/Items/<item-id>/Download'
+  'https://your-server/Items/<item-id>/Download'
 ```
 
 `403` is correct for an item above the cap. Run it as an unrestricted user too and confirm `200`,

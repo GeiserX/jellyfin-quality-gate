@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-**Description**: Jellyfin plugin that caps the resolution a user may be served. The cap is measured against the media's actual height, read from its video `MediaStream`, never against the filename, so it survives a rename or a symlink. Over-cap media is served as a capped transcode or as a lower-resolution version of the same item, and requests for the original file are refused. Optionally groups an encoded copy with its original so one film shows two versions rather than appearing twice. Filename regex patterns are legacy and enforce nothing on Jellyfin 12; see [docs/configuration.md](docs/configuration.md#fields-that-do-nothing).
+**Description**: Jellyfin plugin that caps the resolution a user may be served. The cap is measured against the media's actual height, read from its video `MediaStream`, never against the filename, so it survives a rename or a symlink. Over-cap media is served as a capped transcode or as a lower-resolution version of the same item, and requests for the original file are refused. Optionally groups an encoded copy with its original so one film shows two versions rather than appearing twice. Filename regex patterns are legacy and do not enforce media-source restrictions on Jellyfin 12; see [docs/configuration.md](docs/configuration.md#fields-that-do-not-restrict-playback).
 
 **Architecture Pattern**: Monolith - single deployable unit (Jellyfin plugin DLL)
 

@@ -13,13 +13,13 @@ plugin looks exactly like a loaded one that allows everything.
 **2. Does the policy set a Maximum Resolution?** This is the most common cause. Filename
 patterns and the fallback-transcode fields do not restrict anything in current builds. If your
 policy only fills those in, it caps nobody. See
-[the fields that do nothing](configuration.md#fields-that-do-nothing).
+[the fields that do not restrict playback](configuration.md#fields-that-do-not-restrict-playback).
 
 **3. Is the user actually on that policy?** Ask the server rather than reading the admin page:
 
 ```bash
 curl -s -H 'Authorization: MediaBrowser Token="<admin-token>"' \
-  'http://your-server:8096/Plugins/9cab70ca0af34d3aadab6a0df2496a33/Configuration' \
+  'https://your-server/Plugins/9cab70ca0af34d3aadab6a0df2496a33/Configuration' \
   | python3 -m json.tool
 ```
 
@@ -107,7 +107,7 @@ libraries, alert on the plugin not being `Active`, and on any plugin folder stil
 
 Jellyfin 12 accepts only this header form:
 
-```
+```text
 Authorization: MediaBrowser Token="<token>"
 ```
 
@@ -129,7 +129,7 @@ Test it explicitly rather than assuming:
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' \
   -H 'Authorization: MediaBrowser Token="<capped-user-token>"' \
-  'http://your-server:8096/Items/<item-id>/Download'
+  'https://your-server/Items/<item-id>/Download'
 ```
 
 `403` is correct for an item above the cap. If you get `200`, work through
