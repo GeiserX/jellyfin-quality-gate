@@ -12,6 +12,7 @@ using MediaBrowser.Controller.Entities;
 using MediaBrowser.Controller.Library;
 using MediaBrowser.Controller.Providers;
 using MediaBrowser.Controller.Resolvers;
+using MediaBrowser.Model.Entities;
 using MediaBrowser.Model.IO;
 using MediaBrowser.Model.Serialization;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -292,17 +293,51 @@ public class VersionGroupingResolverTests : IDisposable
         Assert.Null(Resolve(files));
     }
 
-    [Fact]
-    public void ThreeDFormat_IsCarriedOntoTheGroupedFilm()
+    [Theory]
+    [InlineData("hsbs", Video3DFormat.HalfSideBySide)]
+    [InlineData("sbs", Video3DFormat.HalfSideBySide)]
+    [InlineData("sbs3d", Video3DFormat.HalfSideBySide)]
+    [InlineData("fsbs", Video3DFormat.FullSideBySide)]
+    [InlineData("htab", Video3DFormat.HalfTopAndBottom)]
+    [InlineData("tab", Video3DFormat.HalfTopAndBottom)]
+    [InlineData("ftab", Video3DFormat.FullTopAndBottom)]
+    [InlineData("mvc", Video3DFormat.MVC)]
+    public void ThreeDFormat_IsCarriedOntoTheGroupedFilm(string token, Video3DFormat expected)
     {
         Enable();
-        var files = Files("Alien (1979) 3d hsbs.mkv", "Alien (1979) 3d hsbs - 720p.mkv");
+        var files = Files(
+            "Alien (1979) 3d " + token + ".mkv",
+            "Alien (1979) 3d " + token + " - 720p.mkv");
 
         var result = Resolve(files);
 
         Assert.NotNull(result);
         var movie = Assert.Single(result!.Items);
-        Assert.Equal(MediaBrowser.Model.Entities.Video3DFormat.HalfSideBySide, ((Video)movie).Video3DFormat);
+        Assert.Equal(expected, ((Video)movie).Video3DFormat);
+    }
+
+    [Fact]
+    public void AFilmWithNo3DMarking_HasNo3DFormat()
+    {
+        Enable();
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv");
+
+        var result = Resolve(files);
+
+        Assert.Null(((Video)Assert.Single(result!.Items)).Video3DFormat);
+    }
+
+    [Fact]
+    public void ATrailerBesideTheFilm_IsAnExtraNotAFilm()
+    {
+        Enable();
+        var files = Files("Alien (1979).mkv", "Alien (1979) - 720p.mkv", "Alien (1979)-trailer.mkv");
+
+        var result = Resolve(files);
+
+        Assert.NotNull(result);
+        Assert.Single(result!.Items);
+        Assert.Contains(result.ExtraFiles, f => f.Name.Contains("trailer", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
