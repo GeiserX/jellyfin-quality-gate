@@ -524,6 +524,46 @@
                     </div>
 
                     <div class="verticalSection">
+                        <h2 class="sectionTitle">Version Grouping</h2>
+                        <p class="fieldDescription">
+                            Jellyfin only groups alternate versions inside a folder named after the film.
+                            In a library whose films sit loose at the root, an encoded copy placed beside
+                            its original therefore shows up as a second film. Turn this on to group the two
+                            wherever they sit, so viewers see one film with a version picker.
+                        </p>
+                        <label class="checkboxContainer">
+                            <input is="emby-checkbox" type="checkbox" id="enableVersionGrouping" />
+                            <span>Group an encoded copy with its original</span>
+                        </label>
+                        <div class="fieldDescription" style="margin-bottom:1.5em;">
+                            Changing this changes how a library resolves. Run a library scan afterwards,
+                            and expect the copies to disappear from the film list as they join their originals.
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="versionGroupingSuffixes">
+                                Copy name suffixes
+                            </label>
+                            <textarea id="versionGroupingSuffixes" class="emby-input" rows="2"
+                                      placeholder=" - 720p"></textarea>
+                            <div class="fieldDescription">
+                                One per line. A file joins another only when its name is exactly that file's
+                                name plus one of these, so "Film - 720p.mp4" joins "Film.mkv" while
+                                "Film - German.mkv" does not. Leading and trailing spaces are significant.
+                            </div>
+                        </div>
+                        <div class="inputContainer">
+                            <label class="inputLabel inputLabelUnfocused" for="versionGroupingRoots">
+                                Library paths
+                            </label>
+                            <textarea id="versionGroupingRoots" class="emby-input" rows="2"
+                                      placeholder="/media/Movies"></textarea>
+                            <div class="fieldDescription">
+                                One per line. Leave empty to apply to every movie library.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="verticalSection">
                         <h2 class="sectionTitle">User Access</h2>
                         <p class="fieldDescription">
                             Assign a policy to each user. Users set to "Use Default" inherit the default policy above.

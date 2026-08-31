@@ -41,6 +41,28 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Example: "/media/intros/GeiserLand.mp4"
     /// </summary>
     public string DefaultIntroVideoPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether an encoded copy sitting beside its original is
+    /// grouped with it as an alternate version.
+    /// Jellyfin only does this inside a folder named after the film, so a library whose films sit
+    /// loose at the root shows the copy as a separate film instead. Off by default: it changes how
+    /// a library resolves, so it should be a deliberate choice.
+    /// </summary>
+    public bool EnableVersionGrouping { get; set; }
+
+    /// <summary>
+    /// Gets or sets the library paths where version grouping applies.
+    /// Empty (the default) means every movie library.
+    /// </summary>
+    public List<string> VersionGroupingRoots { get; set; } = new();
+
+    /// <summary>
+    /// Gets or sets the filename suffixes that mark an encoded copy.
+    /// A file pairs only when its name is exactly another file's name plus one of these, so
+    /// "Movie - 720p.mp4" joins "Movie.mkv" while "Movie - German.mkv" does not.
+    /// </summary>
+    public List<string> VersionGroupingSuffixes { get; set; } = new() { " - 720p" };
 }
 
 /// <summary>
