@@ -43,6 +43,16 @@ public class PluginConfiguration : BasePluginConfiguration
     public string DefaultIntroVideoPath { get; set; } = string.Empty;
 
     /// <summary>
+    /// Gets or sets the policy applied to requests that resolve to no user at all.
+    /// Jellyfin's API-key authentication issues an empty user id, and so does an unauthenticated
+    /// request, so neither carries a policy and both are served without a cap. That is right for a
+    /// server-to-server integration and wrong when the key reaches something a capped user drives.
+    /// Empty (the default) keeps them uncapped, so upgrading changes nothing until a policy is
+    /// chosen here.
+    /// </summary>
+    public string ApiKeyPolicyId { get; set; } = string.Empty;
+
+    /// <summary>
     /// Gets or sets a value indicating whether an encoded copy sitting beside its original is
     /// grouped with it as an alternate version.
     /// Jellyfin only does this inside a folder named after the film, so a library whose films sit

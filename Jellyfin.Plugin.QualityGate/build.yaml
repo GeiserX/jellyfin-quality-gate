@@ -1,6 +1,6 @@
 name: "QualityGate"
 guid: "9cab70ca-0af3-4d3a-adab-6a0df2496a33"
-version: "3.7.0.0"
+version: "3.8.0.0"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "GeiserX"
@@ -11,6 +11,13 @@ imageUrl: ""
 artifacts:
   - Jellyfin.Plugin.QualityGate.dll
 changelog: |
+  ## v3.8.0.0
+  - A request authenticated with a Jellyfin API key, or no credentials at all, carries an empty
+    user id, so it matched no assignment and was served with no cap on any route
+  - New "API key and anonymous requests" setting names the policy those requests are held to
+  - Unset by default, so upgrading changes nothing and no existing integration starts transcoding
+  - A configured policy that is deleted or disabled leaves those requests uncapped rather than
+    denying them: the operator's intent is unknown, and guessing takes out an integration
   ## v3.7.0.0
   - Version grouping: an encoded copy placed beside its original is grouped with it as an alternate
     version, wherever the two sit. Jellyfin only does this inside a folder named after the film, so a

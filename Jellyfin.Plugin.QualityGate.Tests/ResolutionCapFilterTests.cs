@@ -74,6 +74,7 @@ public class ResolutionCapFilterTests : IDisposable
         _plugin.Configuration.UserPolicies = config.UserPolicies;
         _plugin.Configuration.DefaultPolicyId = config.DefaultPolicyId;
         _plugin.Configuration.DefaultIntroVideoPath = config.DefaultIntroVideoPath;
+        _plugin.Configuration.ApiKeyPolicyId = config.ApiKeyPolicyId;
     }
 
     /// <summary>Applies a policy capped at 720p to every user without an override.</summary>
@@ -655,6 +656,75 @@ public class ResolutionCapFilterTests : IDisposable
     }
 
     [Fact]
+    public async Task ApiKeyRequest_IsRefused_OnceAnApiKeyPolicyIsConfigured()
+    {
+        // The counterpart to AnonymousRequest_IsNotEvaluated above, which pins the default: with
+        // nothing configured a request carrying no user is served uncapped. Here the operator has
+        // opted in, so the same request must now be held to the cap.
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "p1",
+        });
+        SetItemHeight(1080);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertRefused(allowed, context);
+    }
+
+    [Fact]
+    public async Task ApiKeyRequest_WithinTheCap_IsStillAllowed()
+    {
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "p1",
+        });
+        SetItemHeight(Cap);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
+    public async Task ApiKeyPolicyPointingAtNothing_LeavesTheRequestUncapped()
+    {
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "deleted-policy",
+        });
+        SetItemHeight(2160);
+
+        var httpContext = CreateHttpContext(
+            StreamPath(),
+            queryParams: new Dictionary<string, string> { ["static"] = "true" });
+
+        var (allowed, context) = await RunResourceAsync(httpContext);
+
+        AssertAllowed(allowed, context);
+    }
+
+    [Fact]
     public async Task NameIdentifierClaim_StillResolvesTheUser()
     {
         UseCappedPolicy();
@@ -766,6 +836,44 @@ public class ResolutionCapFilterTests : IDisposable
 
         var kept = Assert.Single(response.MediaSources);
         Assert.Equal(720, kept.MediaStreams[0].Height);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_ForAnApiKeyCaller_IsCapped_OnceAnApiKeyPolicyIsConfigured()
+    {
+        // The delivery half of this is covered above. This is the negotiation half: an API key
+        // resolves to no user, so before the opt-in existed this response came back untouched and
+        // the caller was offered the original.
+        SetConfig(new PluginConfiguration
+        {
+            Policies = new List<QualityPolicy>
+            {
+                new QualityPolicy { Id = "p1", Name = "720p tier", Enabled = true, MaxHeight = Cap },
+            },
+            ApiKeyPolicyId = "p1",
+        });
+        var response = ResponseWithHeights(1080, 720);
+
+        // No userId: exactly what Jellyfin's API-key authentication produces.
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST");
+        await RunResultAsync(httpContext, response);
+
+        var kept = Assert.Single(response.MediaSources);
+        Assert.Equal(Cap, kept.MediaStreams[0].Height);
+    }
+
+    [Fact]
+    public async Task PlaybackInfo_ForAnApiKeyCaller_IsUntouched_WhenNoApiKeyPolicyIsConfigured()
+    {
+        // The default, and the reverse control for the test above: a capped policy exists and is
+        // even the default for real users, but an API-key caller keeps every source.
+        UseCappedPolicy();
+        var response = ResponseWithHeights(1080, 720);
+
+        var httpContext = CreateHttpContext($"/Items/{ItemId}/PlaybackInfo", "POST");
+        await RunResultAsync(httpContext, response);
+
+        Assert.Equal(2, response.MediaSources.Count);
     }
 
     [Fact]

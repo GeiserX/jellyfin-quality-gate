@@ -455,12 +455,13 @@ public class ResolutionCapFilter : IAsyncResourceFilter, IAsyncResultFilter
     /// </summary>
     private static QualityPolicy? GetCappedPolicy(Guid userId)
     {
-        if (userId == Guid.Empty)
-        {
-            return null;
-        }
+        // An empty id is Jellyfin's API-key or anonymous caller, not a user who happens to have no
+        // assignment, so it is resolved through the opt-in API-key policy rather than the per-user
+        // table. Without that it matched no assignment, took no default, and was served uncapped.
+        var policy = userId == Guid.Empty
+            ? QualityGateService.GetApiKeyPolicy()
+            : QualityGateService.GetUserPolicy(userId);
 
-        var policy = QualityGateService.GetUserPolicy(userId);
         return QualityGateService.HasHeightCap(policy) ? policy : null;
     }
 
