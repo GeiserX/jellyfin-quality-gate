@@ -37,12 +37,11 @@ SEED = sys.argv[3] if len(sys.argv) > 3 else None
 
 
 def gh(path):
-    # --slurp keeps a paginated result one valid JSON array; stitching pages by string surgery
-    # breaks the moment a body contains "][".
-    out = subprocess.run(["gh", "api", path, "--paginate", "--slurp"],
-                         capture_output=True, text=True, check=True)
-    pages = json.loads(out.stdout)
-    return [item for page in pages for item in page]
+    # One page of 100 rather than --paginate --slurp: this repo has ~40 releases, and a plain
+    # request avoids depending on a gh new enough to have --slurp on whatever runner image is
+    # current. If the repo ever passes 100 releases the count assertion below catches it.
+    out = subprocess.run(["gh", "api", path], capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
 
 
 def version_tuple(v):
@@ -71,7 +70,9 @@ if SEED and os.path.exists(SEED):
         if seeded.get(key) is not None:
             header[key] = seeded[key]
 
-releases = gh("repos/%s/releases" % REPO)
+releases = gh("repos/%s/releases?per_page=100" % REPO)
+if len(releases) >= 100:
+    sys.exit("more than 100 releases: this needs pagination before it silently truncates")
 versions = []
 for rel in releases:
     tag = rel.get("tag_name") or ""
