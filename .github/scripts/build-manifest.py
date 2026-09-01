@@ -129,8 +129,13 @@ if not versions:
 versions.sort(key=lambda v: version_tuple(v["version"]), reverse=True)
 header["versions"] = versions
 
-with open(OUT, "w", encoding="utf-8") as fh:
+# Write through a temporary file and rename. Opening OUT directly with "w" truncates it first,
+# so a crash between truncate and write would leave an empty manifest for the Pages upload to
+# publish, which is a worse outcome than the stale-base bug this replaces.
+tmp = OUT + ".tmp"
+with open(tmp, "w", encoding="utf-8") as fh:
     json.dump([header], fh, indent=2, ensure_ascii=False)
     fh.write("\n")
+os.replace(tmp, OUT)
 print("wrote %s with %d versions (newest %s)"
       % (OUT, len(versions), versions[0]["version"]), file=sys.stderr)
