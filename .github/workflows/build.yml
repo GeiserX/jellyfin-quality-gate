@@ -65,46 +65,6 @@ jobs:
           cp Jellyfin.Plugin.QualityGate/bin/Release/net10.0/build.yaml release/ 2>/dev/null || true
           cd release && zip -r ../quality-gate_${{ steps.version.outputs.version }}.zip .
 
-      - name: Calculate checksum
-        id: checksum
-        run: |
-          CHECKSUM=$(md5sum quality-gate_${{ steps.version.outputs.version }}.zip | cut -d ' ' -f 1)
-          echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
-
-      - name: Update manifest.json
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          CHECKSUM="${{ steps.checksum.outputs.checksum }}"
-          TIMESTAMP=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
-
-          # Build new version entry
-          NEW_ENTRY=$(cat <<ENTRY
-          {
-            "version": "${VERSION}",
-            "changelog": "See https://github.com/GeiserX/quality-gate/releases",
-            "targetAbi": "12.0.0.0",
-            "sourceUrl": "https://github.com/GeiserX/quality-gate/releases/download/v${VERSION}/quality-gate_${VERSION}.zip",
-            "checksum": "${CHECKSUM}",
-            "timestamp": "${TIMESTAMP}"
-          }
-          ENTRY
-          )
-
-          # Merge into existing manifest: prepend new version, remove duplicates
-          python3 -c "
-          import json, sys
-          with open('manifest.json') as f:
-              manifest = json.load(f)
-          new_entry = json.loads('''${NEW_ENTRY}''')
-          versions = manifest[0].get('versions', [])
-          versions = [v for v in versions if v['version'] != new_entry['version']]
-          versions.insert(0, new_entry)
-          manifest[0]['versions'] = versions
-          with open('manifest.json', 'w') as f:
-              json.dump(manifest, f, indent=2, ensure_ascii=False)
-              f.write('\n')
-          "
-
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v3
         with:
@@ -114,6 +74,31 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # The published manifest is derived from the release list, not from the copy in the repo.
+      # It used to be the committed copy plus one entry, which made a bookkeeping commit
+      # load-bearing: when it did not land, the next release rebuilt from a stale base and the
+      # missing version vanished from the catalogue. That is how 3.3.6.0 and 3.4.0.0 went, and
+      # the recording step had been failing silently since, because Actions may not open pull
+      # requests here. Deriving it makes losing a version impossible.
+      - name: Build the published manifest from the releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          python3 .github/scripts/build-manifest.py \
+            "$GITHUB_REPOSITORY" manifest.json manifest.json
+          # The release was cut moments ago, so prove it is actually in what we are about to
+          # publish rather than trusting the API to have caught up.
+          python3 - "$VERSION" <<'CHECK'
+          import json, sys
+          want = sys.argv[1]
+          have = [v["version"] for v in json.load(open("manifest.json"))[0]["versions"]]
+          if want not in have:
+              sys.exit("refusing to publish: %s is missing from the generated manifest %s"
+                       % (want, have[:5]))
+          print("manifest contains %s and %d versions in total" % (want, len(have)))
+          CHECK
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
@@ -126,31 +111,6 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v5
-
-      # main requires a pull request, so this cannot push straight to it. It also runs last and
-      # never fails the job: the release and the published manifest are what users install from,
-      # and on 2026-08-30 a rejected push to main held back v3.6.0.0 entirely. Recording the
-      # version in the repo copy is bookkeeping, and bookkeeping must not gate delivery.
-      - name: Open a pull request recording the manifest
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          if git diff --quiet -- manifest.json; then
-            echo "manifest unchanged"
-            exit 0
-          fi
-          branch="chore/manifest-v${VERSION}"
-          git config user.name "GeiserX"
-          git config user.email "9169332+GeiserX@users.noreply.github.com"
-          git checkout -b "$branch"
-          git add manifest.json
-          git commit -m "chore: record v${VERSION} in the manifest"
-          git push origin "$branch"
-          gh pr create --base main --head "$branch" \
-            --title "chore: record v${VERSION} in the manifest" \
-            --body "The published manifest is rebuilt from the copy in the repo, so a release that never lands here leaves the next one building on a stale base. That is how 3.3.6.0 and 3.4.0.0 went missing from it."
 
   # Publishing the manifest must not depend on cutting a release. The Pages deploy lives in the
   # build job, which is gated on should_release, so a manifest-only fix could never reach
@@ -166,6 +126,13 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
+
+      - name: Build the published manifest from the releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/scripts/build-manifest.py \
+            "$GITHUB_REPOSITORY" manifest.json manifest.json
 
       - name: Setup Pages
         uses: actions/configure-pages@v6
