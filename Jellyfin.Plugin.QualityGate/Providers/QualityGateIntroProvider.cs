@@ -218,33 +218,46 @@ public class QualityGateIntroProvider : IIntroProvider
                 return true;
             }
 
-            // For episodes: only show the intro once per entire series
+            // For episodes: only show the intro once per entire show
             if (item is Episode episode)
             {
-                var seriesId = episode.SeriesId;
-                var cacheKey = $"{user.Id}:{seriesId}";
+                if (string.IsNullOrEmpty(episode.SeriesPresentationUniqueKey) && episode.SeriesId == Guid.Empty)
+                {
+                    // No show identity at all: nothing to remember it under, and an all-zero key
+                    // would make one such episode silence every other. Show the intro.
+                    return false;
+                }
+
+                // A library that keeps one folder per season at its root gets one Series item
+                // per folder, all merged in the UI through a shared presentation key. Keying on
+                // SeriesId would make "once per show" mean "once per season folder", so the key
+                // is the show-wide one whenever the episode carries it.
+                var showKey = string.IsNullOrEmpty(episode.SeriesPresentationUniqueKey)
+                    ? episode.SeriesId.ToString("N")
+                    : episode.SeriesPresentationUniqueKey;
+                var cacheKey = $"{user.Id}:{showKey}";
 
                 // Check session cache first (covers the gap before Jellyfin updates UserData)
                 if (_seriesIntroShown.ContainsKey(cacheKey))
                 {
                     _logger.LogDebug(
-                        "QualityGateIntroProvider: Skipping intro — user {UserName} already saw intro for series {SeriesId} this session",
-                        user.Username, (object)seriesId);
+                        "QualityGateIntroProvider: Skipping intro — user {UserName} already saw intro for show {ShowKey} this session",
+                        user.Username, showKey);
                     return true;
                 }
 
                 // Persistent state: has the user played, or left mid-way, any episode of this
-                // series? This survives a server restart, which the cache above does not.
-                if (seriesId != Guid.Empty && HasWatchedAnyEpisode(user, seriesId))
+                // show? This survives a server restart, which the cache above does not.
+                if (HasWatchedAnyEpisode(user, episode))
                 {
                     _seriesIntroShown.TryAdd(cacheKey, true);
                     _logger.LogDebug(
-                        "QualityGateIntroProvider: Skipping intro — user {UserName} has play history for series {SeriesId}",
-                        user.Username, (object)seriesId);
+                        "QualityGateIntroProvider: Skipping intro — user {UserName} has play history for show {ShowKey}",
+                        user.Username, showKey);
                     return true;
                 }
 
-                // First time watching this series — show intro, mark in session cache
+                // First time watching this show — show intro, mark in session cache
                 _seriesIntroShown.TryAdd(cacheKey, true);
             }
         }
@@ -257,26 +270,37 @@ public class QualityGateIntroProvider : IIntroProvider
     }
 
     /// <summary>
-    /// Whether the user has played, or stopped part-way through, any episode of the series.
+    /// Whether the user has played, or stopped part-way through, any episode of the show, in any
+    /// season and whichever Series item that season's folder produced.
     /// </summary>
     /// <remarks>
     /// This used to read <c>LastPlayedDate</c> on the Series item's own user data. Jellyfin never
     /// writes that: playback stamps the episode, not the show, so the check never matched and
     /// the intro was held back only by the in-memory cache, which every server restart cleared.
-    /// Asking the library for one played or one resumable episode under the series is what
-    /// Jellyfin itself does for "Next Up", and it is true across seasons and restarts.
+    /// Asking the library for one played or one resumable episode of the show is what Jellyfin
+    /// itself does for "Next Up", and it is true across seasons, season folders and restarts.
     /// </remarks>
-    private bool HasWatchedAnyEpisode(User user, Guid seriesId)
+    private bool HasWatchedAnyEpisode(User user, Episode episode)
     {
         foreach (var resumable in new[] { false, true })
         {
             var query = new InternalItemsQuery(user)
             {
-                AncestorIds = new[] { seriesId },
                 IncludeItemTypes = new[] { BaseItemKind.Episode },
                 Recursive = true,
                 Limit = 1,
             };
+
+            // The presentation key spans every Series item of the show, whatever folder each
+            // season lives in; SeriesId is the fallback for an episode that carries none.
+            if (!string.IsNullOrEmpty(episode.SeriesPresentationUniqueKey))
+            {
+                query.SeriesPresentationUniqueKey = episode.SeriesPresentationUniqueKey;
+            }
+            else
+            {
+                query.AncestorIds = new[] { episode.SeriesId };
+            }
 
             if (resumable)
             {

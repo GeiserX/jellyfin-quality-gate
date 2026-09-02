@@ -1,6 +1,6 @@
 name: "QualityGate"
 guid: "9cab70ca-0af3-4d3a-adab-6a0df2496a33"
-version: "3.8.1.0"
+version: "3.8.2.0"
 targetAbi: "12.0.0.0"
 framework: "net10.0"
 owner: "GeiserX"
@@ -11,6 +11,11 @@ imageUrl: ""
 artifacts:
   - Jellyfin.Plugin.QualityGate.dll
 changelog: |
+  ## v3.8.2.0
+  - A library that keeps one folder per season at its root gets one Series item per folder, and
+    the intro's "once per show" rule was keyed on that per-folder SeriesId, so it played again on
+    every new season. Both the session cache and the play-history check now key on the show's
+    presentation key, the one Jellyfin merges seasons under, with SeriesId as the fallback
   ## v3.8.1.0
   - The intro played again on every episode after a server restart. The "once per series" rule
     read LastPlayedDate on the Series item, which Jellyfin never writes (playback stamps the
