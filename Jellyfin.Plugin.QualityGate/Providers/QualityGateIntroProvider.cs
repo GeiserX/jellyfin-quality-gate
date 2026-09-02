@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+using Jellyfin.Data.Enums;
 using Jellyfin.Database.Implementations.Entities;
 using Jellyfin.Plugin.QualityGate.Services;
 using MediaBrowser.Controller.Entities;
@@ -192,7 +193,8 @@ public class QualityGateIntroProvider : IIntroProvider
     /// <summary>
     /// Determines whether the intro should be skipped for this playback.
     /// Movies: skip if user is resuming (has playback progress).
-    /// Episodes: skip if user has already watched any episode of the series.
+    /// Episodes: skip if the user has played or left mid-way any episode of the series, in any
+    /// season, or has already been shown the intro for it since the server started.
     /// </summary>
     private bool ShouldSkipIntro(BaseItem item, User user)
     {
@@ -231,18 +233,15 @@ public class QualityGateIntroProvider : IIntroProvider
                     return true;
                 }
 
-                // Check persistent state: has the user ever played anything in this series?
-                if (episode.Series != null)
+                // Persistent state: has the user played, or left mid-way, any episode of this
+                // series? This survives a server restart, which the cache above does not.
+                if (seriesId != Guid.Empty && HasWatchedAnyEpisode(user, seriesId))
                 {
-                    var seriesData = _userDataManager.GetUserData(user, episode.Series);
-                    if (seriesData?.LastPlayedDate != null)
-                    {
-                        _seriesIntroShown.TryAdd(cacheKey, true);
-                        _logger.LogDebug(
-                            "QualityGateIntroProvider: Skipping intro — user {UserName} has play history for series {SeriesName}",
-                            user.Username, episode.Series.Name);
-                        return true;
-                    }
+                    _seriesIntroShown.TryAdd(cacheKey, true);
+                    _logger.LogDebug(
+                        "QualityGateIntroProvider: Skipping intro — user {UserName} has play history for series {SeriesId}",
+                        user.Username, (object)seriesId);
+                    return true;
                 }
 
                 // First time watching this series — show intro, mark in session cache
@@ -252,6 +251,46 @@ public class QualityGateIntroProvider : IIntroProvider
         catch (Exception ex)
         {
             _logger.LogDebug(ex, "QualityGateIntroProvider: Error checking skip state, showing intro");
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether the user has played, or stopped part-way through, any episode of the series.
+    /// </summary>
+    /// <remarks>
+    /// This used to read <c>LastPlayedDate</c> on the Series item's own user data. Jellyfin never
+    /// writes that: playback stamps the episode, not the show, so the check never matched and
+    /// the intro was held back only by the in-memory cache, which every server restart cleared.
+    /// Asking the library for one played or one resumable episode under the series is what
+    /// Jellyfin itself does for "Next Up", and it is true across seasons and restarts.
+    /// </remarks>
+    private bool HasWatchedAnyEpisode(User user, Guid seriesId)
+    {
+        foreach (var resumable in new[] { false, true })
+        {
+            var query = new InternalItemsQuery(user)
+            {
+                AncestorIds = new[] { seriesId },
+                IncludeItemTypes = new[] { BaseItemKind.Episode },
+                Recursive = true,
+                Limit = 1,
+            };
+
+            if (resumable)
+            {
+                query.IsResumable = true;
+            }
+            else
+            {
+                query.IsPlayed = true;
+            }
+
+            if (_libraryManager.GetItemList(query).Count > 0)
+            {
+                return true;
+            }
         }
 
         return false;
