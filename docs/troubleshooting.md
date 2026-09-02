@@ -145,6 +145,26 @@ item, so it is not gated. It can only return segments that already exist in the 
 folder, which for a capped user were produced under the cap. [How it works](how-it-works.md#the-one-route-that-is-not-covered)
 explains why closing it is a bigger change than the exposure warrants.
 
+## I want a user to see only part of a library
+
+QualityGate does not do this, and it does not need to: Jellyfin does it natively and at the
+right layer. Since 10.9 a user's parental controls carry **Allow items with tags** and **Block
+items with tags**, and tags inherit from parent folders.
+
+1. Open the folder in Jellyfin, **Edit metadata**, and add a tag such as `group1`. A folder
+   inside a library is an item like any other, and everything under it inherits the tag. Tag
+   each folder the group may see.
+2. On the user, **Parental Control**, add `group1` under **Allow items with tags**.
+
+Verified on Jellyfin 12: with one folder tagged and the allow list set, the user saw 0 of
+4,032 movies, exactly the 22 episodes under the folder, nothing for other shows in search or
+Next Up, and a direct request for a hidden item returned 404. The filter is applied inside
+Jellyfin's item query, so it holds on every route an item can surface through.
+
+With an allow list, an item with no tags is hidden, so every folder the user may see needs a
+tag. **Block items with tags** is the inverse and the better fit for "everything except this
+folder". Folder items receive no remote metadata, so a refresh does not strip the tag.
+
 ## Intros play twice, or play when I do not expect them
 
 Jellyfin aggregates every registered `IIntroProvider`. If the built-in **Local Intros** plugin is
