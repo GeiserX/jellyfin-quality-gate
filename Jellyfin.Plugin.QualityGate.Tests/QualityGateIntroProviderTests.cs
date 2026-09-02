@@ -417,6 +417,22 @@ public class QualityGateIntroProviderTests : IDisposable
     }
 
     [Fact]
+    public async Task GetIntros_Episode_WithoutAnyShowIdentity_GetsTheIntro_AndSilencesNothingElse()
+    {
+        ConfigureDefaultIntro();
+        _libraryManagerMock.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>()))
+            .Returns(new List<BaseItem>());
+        var user = new User("s7", "default", "default");
+
+        var first = (await _provider.GetIntros(new Episode { Id = Guid.NewGuid(), IndexNumber = 1 }, user)).ToList();
+        var second = (await _provider.GetIntros(new Episode { Id = Guid.NewGuid(), IndexNumber = 2 }, user)).ToList();
+
+        Assert.Single(first);
+        Assert.Single(second);
+        _libraryManagerMock.Verify(l => l.GetItemList(It.IsAny<InternalItemsQuery>()), Times.Never);
+    }
+
+    [Fact]
     public async Task GetIntros_Episode_NeverConsultsTheSeriesRowUserData()
     {
         // Jellyfin never stamps LastPlayedDate on a Series row, so a check there is a check

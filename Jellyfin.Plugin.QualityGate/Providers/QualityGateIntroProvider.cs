@@ -221,6 +221,13 @@ public class QualityGateIntroProvider : IIntroProvider
             // For episodes: only show the intro once per entire show
             if (item is Episode episode)
             {
+                if (string.IsNullOrEmpty(episode.SeriesPresentationUniqueKey) && episode.SeriesId == Guid.Empty)
+                {
+                    // No show identity at all: nothing to remember it under, and an all-zero key
+                    // would make one such episode silence every other. Show the intro.
+                    return false;
+                }
+
                 // A library that keeps one folder per season at its root gets one Series item
                 // per folder, all merged in the UI through a shared presentation key. Keying on
                 // SeriesId would make "once per show" mean "once per season folder", so the key
@@ -275,11 +282,6 @@ public class QualityGateIntroProvider : IIntroProvider
     /// </remarks>
     private bool HasWatchedAnyEpisode(User user, Episode episode)
     {
-        if (string.IsNullOrEmpty(episode.SeriesPresentationUniqueKey) && episode.SeriesId == Guid.Empty)
-        {
-            return false;
-        }
-
         foreach (var resumable in new[] { false, true })
         {
             var query = new InternalItemsQuery(user)
