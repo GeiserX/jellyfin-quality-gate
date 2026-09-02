@@ -323,6 +323,7 @@ public class QualityGateIntroProviderTests : IDisposable
     private static bool AsksForEpisodesUnder(InternalItemsQuery q, Guid seriesId) =>
         q.AncestorIds.Contains(seriesId)
         && q.IncludeItemTypes.Contains(BaseItemKind.Episode)
+        && q.Recursive
         && q.Limit == 1;
 
     [Fact]
