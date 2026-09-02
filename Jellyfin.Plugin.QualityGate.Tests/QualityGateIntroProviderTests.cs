@@ -312,70 +312,108 @@ public class QualityGateIntroProviderTests : IDisposable
         return introPath;
     }
 
-    private static Episode MakeEpisode(Guid seriesId, int index) => new Episode
+    private static Episode MakeEpisode(string showKey, int index, Guid? seriesId = null) => new Episode
     {
         Id = Guid.NewGuid(),
         Name = $"Episode {index}",
         IndexNumber = index,
-        SeriesId = seriesId,
+        SeriesId = seriesId ?? Guid.NewGuid(),
+        SeriesPresentationUniqueKey = showKey,
     };
 
-    private static bool AsksForEpisodesUnder(InternalItemsQuery q, Guid seriesId) =>
-        q.AncestorIds.Contains(seriesId)
+    private static string NewShowKey() => $"{Guid.NewGuid():N}-es-lib";
+
+    private static bool AsksForEpisodesOfShow(InternalItemsQuery q, string showKey) =>
+        q.SeriesPresentationUniqueKey == showKey
         && q.IncludeItemTypes.Contains(BaseItemKind.Episode)
         && q.Recursive
         && q.Limit == 1;
 
     [Fact]
-    public async Task GetIntros_Episode_SeriesWithAPlayedEpisode_SkipsIntro_WithoutAnyCache()
+    public async Task GetIntros_Episode_ShowWithAPlayedEpisode_SkipsIntro_WithoutAnyCache()
     {
         // A fresh process, nothing in the session cache: this is the state after a server
         // restart, which used to replay the intro for every show.
         ConfigureDefaultIntro();
-        var seriesId = Guid.NewGuid();
+        var show = NewShowKey();
         _libraryManagerMock.Setup(l => l.GetItemList(It.Is<InternalItemsQuery>(
-                q => q.IsPlayed == true && AsksForEpisodesUnder(q, seriesId))))
-            .Returns(new List<BaseItem> { MakeEpisode(seriesId, 1) });
+                q => q.IsPlayed == true && AsksForEpisodesOfShow(q, show))))
+            .Returns(new List<BaseItem> { MakeEpisode(show, 1) });
         _libraryManagerMock.Setup(l => l.GetItemList(It.Is<InternalItemsQuery>(q => q.IsResumable == true)))
             .Returns(new List<BaseItem>());
 
-        var result = await _provider.GetIntros(MakeEpisode(seriesId, 7), new User("s1", "default", "default"));
+        var result = await _provider.GetIntros(MakeEpisode(show, 7), new User("s1", "default", "default"));
 
         Assert.Empty(result);
     }
 
     [Fact]
-    public async Task GetIntros_Episode_SeriesLeftMidway_SkipsIntro()
+    public async Task GetIntros_Episode_ShowLeftMidway_SkipsIntro()
     {
         ConfigureDefaultIntro();
-        var seriesId = Guid.NewGuid();
+        var show = NewShowKey();
         _libraryManagerMock.Setup(l => l.GetItemList(It.Is<InternalItemsQuery>(q => q.IsPlayed == true)))
             .Returns(new List<BaseItem>());
         _libraryManagerMock.Setup(l => l.GetItemList(It.Is<InternalItemsQuery>(
-                q => q.IsResumable == true && AsksForEpisodesUnder(q, seriesId))))
-            .Returns(new List<BaseItem> { MakeEpisode(seriesId, 3) });
+                q => q.IsResumable == true && AsksForEpisodesOfShow(q, show))))
+            .Returns(new List<BaseItem> { MakeEpisode(show, 3) });
 
-        var result = await _provider.GetIntros(MakeEpisode(seriesId, 4), new User("s2", "default", "default"));
+        var result = await _provider.GetIntros(MakeEpisode(show, 4), new User("s2", "default", "default"));
 
         Assert.Empty(result);
     }
 
     [Fact]
-    public async Task GetIntros_Episode_SeriesNeverWatched_ShowsIntroOnce_ThenSkipsEveryOtherEpisode()
+    public async Task GetIntros_Episode_ShowNeverWatched_ShowsIntroOnce_ThenSkipsEveryOtherEpisode()
     {
         ConfigureDefaultIntro();
-        var seriesId = Guid.NewGuid();
+        var show = NewShowKey();
         _libraryManagerMock.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>()))
             .Returns(new List<BaseItem>());
         var user = new User("s3", "default", "default");
 
-        var first = (await _provider.GetIntros(MakeEpisode(seriesId, 1), user)).ToList();
-        var second = (await _provider.GetIntros(MakeEpisode(seriesId, 2), user)).ToList();
-        var otherSeason = (await _provider.GetIntros(MakeEpisode(seriesId, 1), user)).ToList();
+        var first = (await _provider.GetIntros(MakeEpisode(show, 1), user)).ToList();
+        var second = (await _provider.GetIntros(MakeEpisode(show, 2), user)).ToList();
 
         Assert.Single(first);
         Assert.Empty(second);
-        Assert.Empty(otherSeason);
+    }
+
+    [Fact]
+    public async Task GetIntros_Episode_SeasonFoldersAreOneShow()
+    {
+        // One folder per season at the library root gives one Series item per folder, so the
+        // episodes of one show carry different SeriesIds. They share a presentation key, and
+        // that is what "once per show" must key on.
+        ConfigureDefaultIntro();
+        var show = NewShowKey();
+        _libraryManagerMock.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>()))
+            .Returns(new List<BaseItem>());
+        var user = new User("s5", "default", "default");
+
+        var season1 = (await _provider.GetIntros(MakeEpisode(show, 1, Guid.NewGuid()), user)).ToList();
+        var season2 = (await _provider.GetIntros(MakeEpisode(show, 1, Guid.NewGuid()), user)).ToList();
+
+        Assert.Single(season1);
+        Assert.Empty(season2);
+    }
+
+    [Fact]
+    public async Task GetIntros_Episode_WithoutAPresentationKey_FallsBackToTheSeriesId()
+    {
+        ConfigureDefaultIntro();
+        var seriesId = Guid.NewGuid();
+        _libraryManagerMock.Setup(l => l.GetItemList(It.Is<InternalItemsQuery>(
+                q => q.IsPlayed == true && q.AncestorIds.Contains(seriesId)
+                     && string.IsNullOrEmpty(q.SeriesPresentationUniqueKey))))
+            .Returns(new List<BaseItem> { new Episode { Id = Guid.NewGuid(), SeriesId = seriesId } });
+        _libraryManagerMock.Setup(l => l.GetItemList(It.Is<InternalItemsQuery>(q => q.IsResumable == true)))
+            .Returns(new List<BaseItem>());
+
+        var episode = new Episode { Id = Guid.NewGuid(), IndexNumber = 2, SeriesId = seriesId };
+        var result = await _provider.GetIntros(episode, new User("s6", "default", "default"));
+
+        Assert.Empty(result);
     }
 
     [Fact]
@@ -384,11 +422,10 @@ public class QualityGateIntroProviderTests : IDisposable
         // Jellyfin never stamps LastPlayedDate on a Series row, so a check there is a check
         // that cannot pass. The decision must come from episodes.
         ConfigureDefaultIntro();
-        var seriesId = Guid.NewGuid();
         _libraryManagerMock.Setup(l => l.GetItemList(It.IsAny<InternalItemsQuery>()))
             .Returns(new List<BaseItem>());
 
-        await _provider.GetIntros(MakeEpisode(seriesId, 1), new User("s4", "default", "default"));
+        await _provider.GetIntros(MakeEpisode(NewShowKey(), 1), new User("s4", "default", "default"));
 
         _userDataManagerMock.Verify(u => u.GetUserData(It.IsAny<User>(), It.IsAny<Series>()), Times.Never);
     }

@@ -153,7 +153,8 @@ these.
 
 Intros are skipped when a user resumes a film mid-playback. For a series, the intro plays once
 per user and never again for that show, in any season: the provider asks the library whether the
-user has played, or stopped part-way through, any episode under the series, and keeps an
+user has played, or stopped part-way through, any episode of the show, keyed on the show's
+presentation key so a library with one folder per season still counts as one show, and keeps an
 in-memory note for the gap before Jellyfin saves the first progress report. Before 3.8.1.0 the
 persistent check read `LastPlayedDate` on the Series item, which Jellyfin never writes, so the
 intro came back for every show after each server restart.
